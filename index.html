@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小男娘指数测试仪</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            color: #333;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+            transition: transform 0.3s ease;
+        }
+        .container:hover {
+            transform: translateY(-5px);
+        }
+        h1 {
+            color: #ff9a9e;
+            margin-bottom: 1.5rem;
+            font-size: 1.8rem;
+        }
+        
+        /* 通用输入框样式 */
+        .input-group {
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+        .input-label {
+            display: block;
+            margin-bottom: 8px;
+            color: #ff9a9e;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        .fancy-input {
+            width: 100%;
+            padding: 12px;
+            box-sizing: border-box;
+            border: 2px dashed #fecfef;
+            border-radius: 10px;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s ease;
+            background: #fff;
+            color: #555;
+        }
+        .fancy-input:focus {
+            border-color: #ff9a9e;
+            background-color: #fff0f5;
+            box-shadow: 0 0 10px rgba(255, 154, 158, 0.2);
+        }
+
+        /* 上传区域样式 */
+        .upload-area {
+            border: 2px dashed #fecfef;
+            border-radius: 15px;
+            padding: 1.5rem; /* 稍微调小一点以适应标题 */
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            background: #fafafa;
+            text-align: center; /* 居中内容 */
+        }
+        .upload-area:hover {
+            background-color: #fff0f5;
+            border-color: #ff9a9e;
+        }
+        .upload-text {
+            color: #888;
+            font-size: 1rem;
+            pointer-events: none;
+            margin-top: 10px;
+            display: block;
+        }
+        input[type="file"] {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        #preview-img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 10px;
+            display: none;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-top: 10px;
+        }
+
+        /* 按钮样式 */
+        .btn {
+            background: linear-gradient(to right, #ff9a9e 0%, #fecfef 99%, #fecfef 100%);
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            color: white;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 154, 158, 0.4);
+            width: 100%; /* 按钮全宽 */
+        }
+        .btn:hover {
+            opacity: 0.9;
+        }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+        
+        /* QQ获取按钮专用样式（小一点） */
+        .btn-small {
+            width: auto;
+            padding: 8px 20px;
+            font-size: 0.9rem;
+            margin-top: 10px;
+            display: inline-block;
+        }
+
+        /* 结果展示 */
+        .result {
+            margin-top: 2rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.5s ease;
+            padding-bottom: 10px;
+        }
+        .result.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .score {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #ff6b6b;
+            margin: 10px 0;
+        }
+        .comment {
+            font-size: 1.1rem;
+            color: #666;
+            margin-top: 10px;
+        }
+        .loading {
+            display: none;
+            margin: 10px auto;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #ff9a9e;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 分隔线 */
+        .divider {
+            height: 1px;
+            background: linear-gradient(to right, transparent, #fecfef, transparent);
+            margin: 1.5rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>✨ 小男娘指数测试仪 ✨</h1>
+        
+        <!-- 1. 名字测试 (排在第一位) -->
+        <div class="input-group">
+            <label class="input-label">📝 输入名字测试小男娘指数：</label>
+            <input type="text" id="name-input" class="fancy-input" placeholder="请输入你的昵称或名字" maxlength="20">
+        </div>
+
+        <!-- 分隔线 -->
+        <div class="divider"></div>
+
+        <!-- 2. 头像/图片测试 -->
+        <div class="input-group">
+            <label class="input-label">🖼️ 上传头像进行小男娘测试：</label>
+        <div class="upload-area">
+            <div class="upload-text" id="upload-text">点击或拖拽上传头像 / 图片</div>
+            <img id="preview-img" alt="预览图片">
+            <input type="file" id="file-input" accept="image/*">
+        </div>
+       
+        <!-- 3. QQ号辅助 -->
+        <div class="input-group">
+            <label class="input-label">🐧 或者输入QQ号获取头像：</label>
+            <input type="text" id="qq-input" class="fancy-input" placeholder="请输入QQ号码" maxlength="15">
+            <!-- 恢复获取按钮 -->
+            <button class="btn btn-small" id="fetch-btn">获取QQ头像</button>
+        </div>
+
+        <!-- 4. 统一的测试按钮 -->
+        <button class="btn" id="test-btn" disabled>开始测试</button>
+
+        <div class="loading" id="loading"></div>
+        
+        <div class="result" id="result">
+            <div>测试结果为</div>
+            <div class="score" id="score">0</div>
+            <div class="comment" id="comment"></div>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素获取
+        const nameInput = document.getElementById('name-input');
+        const qqInput = document.getElementById('qq-input');
+        const fetchBtn = document.getElementById('fetch-btn'); // 获取QQ头像按钮
+        const fileInput = document.getElementById('file-input');
+        const previewImg = document.getElementById('preview-img');
+        const uploadText = document.getElementById('upload-text');
+        const testBtn = document.getElementById('test-btn');
+        const resultDiv = document.getElementById('result');
+        const scoreEl = document.getElementById('score');
+        const commentEl = document.getElementById('comment');
+        const loading = document.getElementById('loading');
+
+        let currentFile = null;
+
+        // 检查是否可以启用按钮
+        function checkEnableButton() {
+            const hasName = nameInput.value.trim() !== "";
+            const hasImage = previewImg.style.display === 'block';
+            const hasQQ = qqInput.value.trim() !== "";
+            
+            // 只要有名字、图片或QQ号，就启用按钮
+            if (hasName || hasImage || hasQQ) {
+                testBtn.disabled = false;
+            } else {
+                testBtn.disabled = true;
+            }
+        }
+
+        // 监听输入框变化
+        nameInput.addEventListener('input', checkEnableButton);
+        qqInput.addEventListener('input', function() {
+            checkEnableButton();
+        });
+
+        // 监听获取QQ头像按钮点击
+        fetchBtn.addEventListener('click', function() {
+            const qqNumber = qqInput.value.trim();
+            if (!/^\d{5,12}$/.test(qqNumber)) {
+                alert("请输入正确的QQ号码 (5-12位数字)");
+                return;
+            }
+            // 构建QQ头像URL
+            const avatarUrl = `http://q1.qlogo.cn/g?b=qq&nk=${qqNumber}&s=640`;
+            previewImg.src = avatarUrl;
+            previewImg.style.display = 'block';
+            uploadText.style.display = 'none'; // 隐藏文字
+            currentFile = null; // 标记这不是本地文件
+            checkEnableButton();
+        });
+
+        // 监听文件选择
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                currentFile = file;
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    previewImg.src = event.target.result;
+                    previewImg.style.display = 'block';
+                    uploadText.style.display = 'none';
+                    checkEnableButton();
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 统一测试按钮逻辑
+        testBtn.addEventListener('click', function() {
+            const name = nameInput.value.trim();
+            const qq = qqInput.value.trim();
+            
+            // 显示加载
+            loading.style.display = 'block';
+            testBtn.disabled = true;
+            resultDiv.classList.remove('show');
+
+            setTimeout(() => {
+                let score;
+
+                // 优先级逻辑：
+                // 1. 如果有图片（无论是上传的还是QQ获取的），优先用图片算法
+                // 2. 如果没有图片但有名字，用名字算法
+                
+                if (previewImg.style.display === 'block') {
+                    // 图片模式
+                    if (currentFile) {
+                        score = calculateScore(currentFile); // 本地文件算法
+                    } else {
+                        score = calculateScoreForQQ(qq); // QQ头像算法
+                    }
+                } else if (name) {
+                    // 纯名字模式
+                    score = calculateScoreForName(name);
+                } else {
+                    score = 0;
+                }
+
+                displayResult(score);
+                loading.style.display = 'none';
+                testBtn.disabled = false;
+            }, 600);
+        });
+
+        // --- 算法函数 ---
+
+        // 1. 本地文件算法
+        function calculateScore(file) {
+            let seed = file.name.length + file.size;
+            for (let i = 0; i < file.name.length; i++) {
+                seed = ((seed << 5) + seed) + file.name.charCodeAt(i);
+            }
+            return (Math.abs(seed) % 100) + 1;
+        }
+
+        // 2. QQ号算法 (含VIP后门)
+        function calculateScoreForQQ(qqNumber) {
+            const vipList = ["3560891900", "369161984", "1394514864"];
+            if (vipList.includes(qqNumber)) return 100;
+
+            let seed = 0;
+            for (let i = 0; i < qqNumber.length; i++) {
+                seed = ((seed << 5) - seed) + qqNumber.charCodeAt(i);
+            }
+            return (Math.abs(seed) % 100) + 1;
+        }
+
+        // 3. 名字算法
+        function calculateScoreForName(name) {
+            let seed = name.length;
+            for (let i = 0; i < name.length; i++) {
+                seed += name.charCodeAt(i) * (i + 1);
+            }
+            return (Math.abs(seed) % 100) + 1;
+        }
+
+        // 显示结果
+        function displayResult(score) {
+            scoreEl.innerText = score;
+            let comment = "";
+            if (score >= 90) comment = "🌸 纯度极高，究极生物！";
+            else if (score >= 75) comment = "✨ 可爱到犯规，由于太可爱被原谅了";
+            else if (score >= 60) comment = "🎀 很有潜力，伪娘力max";
+            else if (score >= 40) comment = "⚖️ 薛定谔的性别，让人捉摸不透";
+            else if (score >= 20) comment = "💪 猛男气息溢出，但眼神里藏着秘密";
+            else comment = "🗿 纯爷们...大概吧？";
+            commentEl.innerText = comment;
+            resultDiv.classList.add('show');
+        }
+    </script>
+</body>
+</html>
