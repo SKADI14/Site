@@ -337,6 +337,12 @@
             chatEl.scrollTop = chatEl.scrollHeight;
         }
 
+        function shouldAutoFocusInput() {
+            const coarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+            const mobileUA = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+            return !(coarsePointer || mobileUA);
+        }
+
         function addMessage(role, text) {
             if (emptyStateEl) {
                 emptyStateEl.style.display = "none";
@@ -412,7 +418,9 @@
             } finally {
                 isSending = false;
                 setComposerState();
-                inputEl.focus();
+                if (shouldAutoFocusInput()) {
+                    inputEl.focus();
+                }
             }
         }
 
