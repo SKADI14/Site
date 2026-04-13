@@ -1,4 +1,15 @@
 export default async function handler(req, res) {
+  // ✅ CORS（关键）
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // ✅ 处理预检请求
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  // ✅ 只允许 POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -12,21 +23,14 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "deepseek-chat",
-        messages: req.body.messages,
-        frequency_penalty: 0.5,
-        max_tokens: 1024,
-        presence_penalty: 0.5,
-        temperature: 1.3,
-        top_p: 1
+        messages: req.body.messages
       })
     });
 
     const data = await response.json();
 
-    // 只返回核心内容
     res.status(200).json({
-      reply: data.choices[0].message.content,
-      usage: data.usage
+      reply: data.choices[0].message.content
     });
 
   } catch (err) {
