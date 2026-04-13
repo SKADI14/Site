@@ -15,13 +15,9 @@
 2. 直接打开 [index.html](index.html)。
 3. 在输入框里打字，点发送就行。
 
-## 小提醒
+## 提示（缺陷）
 
-现在页面里默认连的是这个接口：
-
-https://backend-lilac-alpha.vercel.app/api/chat
-
-如果你有自己的后端，把 [index.html](index.html) 里的 `API_URL` 改掉就可以。
+实际请求由其他网站接收，因此需要魔法上网，不然会fail to fetch。
 
 ## 项目结构
 
