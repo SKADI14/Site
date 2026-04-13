@@ -280,12 +280,35 @@
         const inputEl = document.getElementById("input");
         const sendBtnEl = document.getElementById("sendBtn");
         const emptyStateEl = document.getElementById("emptyState");
+        const SYSTEM_SETTING_URL = "./docs/system_setting.txt";
+        const DEFAULT_SYSTEM_PROMPT = "你是一个有帮助的助手";
 
         let isSending = false;
+        let systemPrompt = DEFAULT_SYSTEM_PROMPT;
 
         let messages = [
-            { role: "system", content: "你是一个有帮助的助手" }
+            { role: "system", content: systemPrompt }
         ];
+
+        async function loadSystemSetting() {
+            try {
+                const res = await fetch(SYSTEM_SETTING_URL, {
+                    cache: "no-store"
+                });
+
+                if (!res.ok) {
+                    throw new Error("加载设定失败: " + res.status);
+                }
+
+                const text = (await res.text()).trim();
+                if (text) {
+                    systemPrompt = text;
+                    messages[0] = { role: "system", content: systemPrompt };
+                }
+            } catch (err) {
+                console.warn("读取 system_setting 失败，使用默认设定。", err);
+            }
+        }
 
         function escapeHtml(text) {
             const map = {
@@ -335,6 +358,10 @@
         }
 
         async function send() {
+            if (messages[0].content !== systemPrompt) {
+                messages[0] = { role: "system", content: systemPrompt };
+            }
+
             const text = inputEl.value.trim();
             if (!text || isSending) {
                 return;
@@ -403,6 +430,7 @@
 
         autoResizeTextarea();
         setComposerState();
+        loadSystemSetting();
     </script>
 </body>
 </html>
