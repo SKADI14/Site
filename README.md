@@ -28,9 +28,17 @@ Site/
 ├─ vercel.json
 ├─ api/
 │  └─ chat.js
-└─ docs/
-	├─ system_setting.txt
-	└─ welcomes.txt
+├─ docs/
+│  ├─ system_setting.txt
+│  └─ welcomes.txt
+├─ pics/
+│  ├─ egg/
+│  │  └─ Priestess.jpg
+│  └─ profile/
+│     ├─ vanilla.png
+│     └─ Priestess.jpg
+└─ sound/
+   └─ Priestess.m4a
 ```
 
 ## 后面可能会加的东西
