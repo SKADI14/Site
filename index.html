@@ -317,6 +317,7 @@
         const SYSTEM_SETTING_URL = "./docs/system_setting.txt";
         const WELCOMES_URL = "./docs/welcomes.txt";
         const EGG_IMAGE_PATHS = ["./pics/egg/Priestess.jpg"];
+        const EGG_AUDIO_PATH = "./sound/Priestess.m4a";
         const EGG_TRIGGER_COUNT = 5;
         const EGG_TRIGGER_WINDOW_MS = 1200;
         const DEFAULT_SYSTEM_PROMPT = "你是一个有帮助的助手";
@@ -326,6 +327,9 @@
         let systemPrompt = DEFAULT_SYSTEM_PROMPT;
         let eggClickTimestamps = [];
         let isEggOverlayActive = false;
+        const eggAudio = new Audio(EGG_AUDIO_PATH);
+
+        eggAudio.preload = "auto";
 
         let messages = [
             { role: "system", content: systemPrompt }
@@ -483,11 +487,17 @@
                 const imagePath = pickRandomEggImagePath();
                 eggOverlayEl.style.backgroundImage = imagePath ? 'url("' + imagePath + '")' : "none";
                 eggOverlayEl.classList.add("active");
+                eggAudio.currentTime = 0;
+                eggAudio.play().catch(function(err) {
+                    console.warn("彩蛋音频播放失败。", err);
+                });
                 if (document.activeElement && typeof document.activeElement.blur === "function") {
                     document.activeElement.blur();
                 }
             } else {
                 eggOverlayEl.classList.remove("active");
+                eggAudio.pause();
+                eggAudio.currentTime = 0;
             }
         }
 
