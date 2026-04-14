@@ -280,7 +280,9 @@
         const inputEl = document.getElementById("input");
         const sendBtnEl = document.getElementById("sendBtn");
         const emptyStateEl = document.getElementById("emptyState");
+        const welcomeTitleEl = emptyStateEl ? emptyStateEl.querySelector("h1") : null;
         const SYSTEM_SETTING_URL = "./docs/system_setting.txt";
+        const WELCOMES_URL = "./docs/welcomes.txt";
         const DEFAULT_SYSTEM_PROMPT = "你是一个有帮助的助手";
 
         let isSending = false;
@@ -307,6 +309,82 @@
                 }
             } catch (err) {
                 console.warn("读取 system_setting 失败，使用默认设定。", err);
+            }
+        }
+
+        function parseWelcomeLines(text) {
+            const lines = text.split(/\r?\n/);
+            const entries = [];
+
+            for (const raw of lines) {
+                const line = raw.trim();
+                if (!line) {
+                    continue;
+                }
+
+                const match = line.match(/^(.*\S)\s+([0-9]+(?:\.[0-9]+)?)$/);
+                if (!match) {
+                    continue;
+                }
+
+                const content = match[1].trim();
+                const weight = Number(match[2]);
+                if (!content || !Number.isFinite(weight) || weight <= 0) {
+                    continue;
+                }
+
+                entries.push({ content, weight });
+            }
+
+            return entries;
+        }
+
+        function pickWeightedWelcome(entries) {
+            const totalWeight = entries.reduce(function(sum, entry) {
+                return sum + entry.weight;
+            }, 0);
+
+            if (totalWeight <= 0) {
+                return "";
+            }
+
+            let random = Math.random() * totalWeight;
+            for (const entry of entries) {
+                random -= entry.weight;
+                if (random <= 0) {
+                    return entry.content;
+                }
+            }
+
+            return entries[entries.length - 1].content;
+        }
+
+        async function loadWelcomeTitle() {
+            if (!welcomeTitleEl) {
+                return;
+            }
+
+            try {
+                const res = await fetch(WELCOMES_URL, {
+                    cache: "no-store"
+                });
+
+                if (!res.ok) {
+                    throw new Error("加载欢迎语失败: " + res.status);
+                }
+
+                const text = await res.text();
+                const entries = parseWelcomeLines(text);
+                if (!entries.length) {
+                    return;
+                }
+
+                const selected = pickWeightedWelcome(entries);
+                if (selected) {
+                    welcomeTitleEl.textContent = selected;
+                }
+            } catch (err) {
+                console.warn("读取 welcomes 失败，使用默认欢迎语。", err);
             }
         }
 
@@ -439,6 +517,7 @@
         autoResizeTextarea();
         setComposerState();
         loadSystemSetting();
+        loadWelcomeTitle();
     </script>
 </body>
 </html>
