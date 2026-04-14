@@ -309,6 +309,7 @@
         const WELCOMES_URL = "./docs/welcomes.txt";
         const EGG_IMAGE_PATHS = ["./pics/egg/Priestess.jpg"];
         const EGG_AUDIO_PATH = "./sound/Priestess.m4a";
+        const EGG_TITLE = "Don't forget me, doctor.";
         const DEFAULT_FAVICON_PATH = "./pics/profile/vanilla.png";
         const EGG_FAVICON_PATH = "./pics/profile/Priestess.jpg";
         const EGG_TRIGGER_COUNT = 5;
@@ -480,6 +481,7 @@
                 const imagePath = pickRandomEggImagePath();
                 eggOverlayEl.style.backgroundImage = imagePath ? 'url("' + imagePath + '")' : "none";
                 eggOverlayEl.classList.add("active");
+                document.title = EGG_TITLE;
                 if (siteFaviconEl) {
                     siteFaviconEl.href = EGG_FAVICON_PATH;
                 }
