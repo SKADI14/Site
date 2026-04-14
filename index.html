@@ -203,6 +203,25 @@
             color: #9ca3af;
         }
 
+        .egg-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background-color: rgba(10, 10, 10, 0.94);
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: contain;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        .egg-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
         @keyframes fade-up {
             from {
                 opacity: 0;
@@ -274,6 +293,8 @@
         </div>
     </main>
 
+    <div id="eggOverlay" class="egg-overlay" aria-hidden="true"></div>
+
     <script>
         const API_URL = "https://backend-lilac-alpha.vercel.app/api/chat";
         const chatEl = document.getElementById("chat");
@@ -281,13 +302,19 @@
         const sendBtnEl = document.getElementById("sendBtn");
         const emptyStateEl = document.getElementById("emptyState");
         const welcomeTitleEl = emptyStateEl ? emptyStateEl.querySelector("h1") : null;
+        const eggOverlayEl = document.getElementById("eggOverlay");
         const SYSTEM_SETTING_URL = "./docs/system_setting.txt";
         const WELCOMES_URL = "./docs/welcomes.txt";
+        const EGG_IMAGE_PATHS = ["./pics/egg/Priestess.jpg"];
+        const EGG_TRIGGER_COUNT = 5;
+        const EGG_TRIGGER_WINDOW_MS = 1200;
         const DEFAULT_SYSTEM_PROMPT = "你是一个有帮助的助手";
         const DEFAULT_WELCOME_TITLE = "今天想聊点什么？";
 
         let isSending = false;
         let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+        let eggClickTimestamps = [];
+        let isEggOverlayActive = false;
 
         let messages = [
             { role: "system", content: systemPrompt }
@@ -425,6 +452,43 @@
             return !(coarsePointer || mobileUA);
         }
 
+        function pickRandomEggImagePath() {
+            if (!EGG_IMAGE_PATHS.length) {
+                return "";
+            }
+            const index = Math.floor(Math.random() * EGG_IMAGE_PATHS.length);
+            return EGG_IMAGE_PATHS[index];
+        }
+
+        function setEggOverlayActive(nextActive) {
+            if (!eggOverlayEl) {
+                return;
+            }
+
+            isEggOverlayActive = nextActive;
+
+            if (isEggOverlayActive) {
+                const imagePath = pickRandomEggImagePath();
+                eggOverlayEl.style.backgroundImage = imagePath ? 'url("' + imagePath + '")' : "none";
+                eggOverlayEl.classList.add("active");
+            } else {
+                eggOverlayEl.classList.remove("active");
+            }
+        }
+
+        function handleRapidClickToggle() {
+            const now = Date.now();
+            eggClickTimestamps.push(now);
+            eggClickTimestamps = eggClickTimestamps.filter(function(ts) {
+                return now - ts <= EGG_TRIGGER_WINDOW_MS;
+            });
+
+            if (eggClickTimestamps.length >= EGG_TRIGGER_COUNT) {
+                eggClickTimestamps = [];
+                setEggOverlayActive(!isEggOverlayActive);
+            }
+        }
+
         function addMessage(role, text) {
             if (emptyStateEl) {
                 emptyStateEl.style.display = "none";
@@ -517,6 +581,8 @@
                 send();
             }
         });
+
+        document.addEventListener("click", handleRapidClickToggle);
 
         autoResizeTextarea();
         setComposerState();
