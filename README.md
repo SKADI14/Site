@@ -25,8 +25,12 @@
 Site/
 ├─ index.html
 ├─ README.md
-└─ api/
-	 └─ chat.js
+├─ vercel.json
+├─ api/
+│  └─ chat.js
+└─ docs/
+	├─ system_setting.txt
+	└─ welcomes.txt
 ```
 
 ## 后面可能会加的东西
