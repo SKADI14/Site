@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ciallo!!</title>
+    <link id="siteFavicon" rel="icon" type="image/png" href="./pics/profile/vanilla.png">
     <style>
         @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap");
 
@@ -303,10 +304,13 @@
         const emptyStateEl = document.getElementById("emptyState");
         const welcomeTitleEl = emptyStateEl ? emptyStateEl.querySelector("h1") : null;
         const eggOverlayEl = document.getElementById("eggOverlay");
+        const siteFaviconEl = document.getElementById("siteFavicon");
         const SYSTEM_SETTING_URL = "./docs/system_setting.txt";
         const WELCOMES_URL = "./docs/welcomes.txt";
         const EGG_IMAGE_PATHS = ["./pics/egg/Priestess.jpg"];
         const EGG_AUDIO_PATH = "./sound/Priestess.m4a";
+        const DEFAULT_FAVICON_PATH = "./pics/profile/vanilla.png";
+        const EGG_FAVICON_PATH = "./pics/profile/Priestess.jpg";
         const EGG_TRIGGER_COUNT = 5;
         const EGG_TRIGGER_WINDOW_MS = 1200;
         const DEFAULT_SYSTEM_PROMPT = "你是一个有帮助的助手";
@@ -476,6 +480,9 @@
                 const imagePath = pickRandomEggImagePath();
                 eggOverlayEl.style.backgroundImage = imagePath ? 'url("' + imagePath + '")' : "none";
                 eggOverlayEl.classList.add("active");
+                if (siteFaviconEl) {
+                    siteFaviconEl.href = EGG_FAVICON_PATH;
+                }
                 eggAudio.currentTime = 0;
                 eggAudio.play().catch(function(err) {
                     console.warn("彩蛋音频播放失败。", err);
@@ -610,6 +617,9 @@
 
         autoResizeTextarea();
         setComposerState();
+        if (siteFaviconEl) {
+            siteFaviconEl.href = DEFAULT_FAVICON_PATH;
+        }
         loadSystemSetting();
         loadWelcomeTitle();
     </script>
