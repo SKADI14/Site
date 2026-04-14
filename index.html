@@ -19,7 +19,6 @@
             --user: #f1f5f9;
             --max-content-width: 780px;
             --max-input-width: 820px;
-            --avatar-offset: 40px;
         }
 
         * {
@@ -86,42 +85,16 @@
             margin: 0 auto;
             padding: 8px 0;
             display: flex;
-            gap: 12px;
             align-items: flex-start;
-        }
-
-        .message-wrap.assistant {
-            padding-right: var(--avatar-offset);
+            justify-content: flex-start;
         }
 
         .message-wrap.user {
-            flex-direction: row-reverse;
-            padding-left: var(--avatar-offset);
-        }
-
-        .avatar {
-            width: 28px;
-            height: 28px;
-            border-radius: 8px;
-            display: grid;
-            place-items: center;
-            font-size: 12px;
-            font-weight: 600;
-            flex-shrink: 0;
-        }
-
-        .avatar.assistant {
-            background: #111827;
-            color: #f9fafb;
-        }
-
-        .avatar.user {
-            background: #dbeafe;
-            color: #0f172a;
+            justify-content: flex-end;
         }
 
         .bubble {
-            width: 100%;
+            max-width: 100%;
             border: 1px solid var(--line);
             border-radius: 14px;
             padding: 13px 14px;
@@ -133,7 +106,11 @@
         }
 
         .bubble.assistant {
-            background: var(--assistant);
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+            padding: 4px 0;
         }
 
         .bubble.user {
@@ -252,10 +229,6 @@
         }
 
         @media (max-width: 640px) {
-            :root {
-                --avatar-offset: 34px;
-            }
-
             .chat-area {
                 padding: 18px 10px 156px;
             }
@@ -265,21 +238,18 @@
             }
 
             .message-wrap {
-                gap: 10px;
                 padding: 6px 0;
-            }
-
-            .avatar {
-                width: 24px;
-                height: 24px;
-                border-radius: 7px;
-                font-size: 11px;
             }
 
             .bubble {
                 font-size: 14px;
                 border-radius: 12px;
                 padding: 11px 12px;
+            }
+
+            .bubble.assistant {
+                border-radius: 0;
+                padding: 4px 0;
             }
 
             .composer {
@@ -536,11 +506,9 @@
             const row = document.createElement("div");
             row.className = "message-row";
 
-            const avatarLabel = role === "user" ? "你" : "AI";
             const safeText = escapeHtml(text);
             row.innerHTML =
                 '<div class="message-wrap ' + role + '">' +
-                '<div class="avatar ' + role + '">' + avatarLabel + '</div>' +
                 '<div class="bubble ' + role + '">' + safeText + '</div>' +
                 "</div>";
 
@@ -575,7 +543,6 @@
             loadingRow.className = "message-row";
             loadingRow.innerHTML =
                 '<div class="message-wrap assistant">' +
-                '<div class="avatar assistant">AI</div>' +
                 '<div class="bubble assistant">思考中...</div>' +
                 "</div>";
             chatEl.appendChild(loadingRow);
