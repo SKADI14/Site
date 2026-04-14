@@ -89,6 +89,10 @@
             align-items: flex-start;
         }
 
+        .message-wrap.user {
+            flex-direction: row-reverse;
+        }
+
         .avatar {
             width: 28px;
             height: 28px;
@@ -525,7 +529,7 @@
             const avatarLabel = role === "user" ? "你" : "AI";
             const safeText = escapeHtml(text);
             row.innerHTML =
-                '<div class="message-wrap">' +
+                '<div class="message-wrap ' + role + '">' +
                 '<div class="avatar ' + role + '">' + avatarLabel + '</div>' +
                 '<div class="bubble ' + role + '">' + safeText + '</div>' +
                 "</div>";
