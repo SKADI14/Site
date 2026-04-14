@@ -260,7 +260,7 @@
     <main class="app">
         <section id="chat" class="chat-area" aria-live="polite">
             <div class="empty" id="emptyState">
-                <h1>今天想聊点什么？</h1>
+                <h1></h1>
                 <p>才不想和你说话呢~</p>
             </div>
         </section>
@@ -284,6 +284,7 @@
         const SYSTEM_SETTING_URL = "./docs/system_setting.txt";
         const WELCOMES_URL = "./docs/welcomes.txt";
         const DEFAULT_SYSTEM_PROMPT = "你是一个有帮助的助手";
+        const DEFAULT_WELCOME_TITLE = "今天想聊点什么？";
 
         let isSending = false;
         let systemPrompt = DEFAULT_SYSTEM_PROMPT;
@@ -364,6 +365,8 @@
                 return;
             }
 
+            welcomeTitleEl.textContent = DEFAULT_WELCOME_TITLE;
+
             try {
                 const res = await fetch(WELCOMES_URL, {
                     cache: "no-store"
@@ -375,6 +378,7 @@
 
                 const text = await res.text();
                 const entries = parseWelcomeLines(text);
+                entries.push({ content: DEFAULT_WELCOME_TITLE, weight: 1 });
                 if (!entries.length) {
                     return;
                 }
