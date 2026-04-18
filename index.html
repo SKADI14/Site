@@ -376,6 +376,7 @@
         const EGG_TRIGGER_WINDOW_MS = 1200;
         const DEFAULT_SYSTEM_PROMPT = "你是一个有帮助的助手";
         const DEFAULT_WELCOME_TITLE = "今天想聊点什么？";
+        const ZIP_FETCH_CONCURRENCY = Math.min(8, Math.max(3, (navigator.hardwareConcurrency || 4) - 1));
 
         let isSending = false;
         let systemPrompt = DEFAULT_SYSTEM_PROMPT;
@@ -676,6 +677,31 @@
             await jsZipLoadPromise;
         }
 
+        async function mapWithConcurrency(items, limit, mapper) {
+            const results = new Array(items.length);
+            let nextIndex = 0;
+
+            async function worker() {
+                while (true) {
+                    const currentIndex = nextIndex;
+                    nextIndex += 1;
+                    if (currentIndex >= items.length) {
+                        return;
+                    }
+                    results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+                }
+            }
+
+            const workers = [];
+            const workerCount = Math.max(1, Math.min(limit, items.length));
+            for (let i = 0; i < workerCount; i += 1) {
+                workers.push(worker());
+            }
+
+            await Promise.all(workers);
+            return results;
+        }
+
         async function buildZipInBrowser(task, progressEl) {
             const files = Array.isArray(task && task.files) ? task.files : [];
             if (!files.length) {
@@ -757,16 +783,32 @@
                 }
             }
 
-            for (let i = 0; i < files.length; i += 1) {
-                const file = files[i];
-                progressEl.textContent = "正在拉取文件 " + (i + 1) + " / " + files.length;
-
+            let finishedCount = 0;
+            const prepared = await mapWithConcurrency(files, ZIP_FETCH_CONCURRENCY, async function(file, index) {
                 try {
                     const fileBlob = await fetchBlobWithRetry(file.url, 30000, 2);
                     const decodedBlob = await decodeScrambledImageIfNeeded(fileBlob, file);
-                    zip.file(file.name || ("image_" + (i + 1) + ".jpg"), decodedBlob);
-                    successCount += 1;
+                    finishedCount += 1;
+                    progressEl.textContent = "正在拉取并还原文件 " + finishedCount + " / " + files.length;
+                    return {
+                        ok: true,
+                        name: file.name || ("image_" + (index + 1) + ".jpg"),
+                        blob: decodedBlob
+                    };
                 } catch (err) {
+                    finishedCount += 1;
+                    progressEl.textContent = "正在拉取并还原文件 " + finishedCount + " / " + files.length;
+                    return {
+                        ok: false
+                    };
+                }
+            });
+
+            for (const item of prepared) {
+                if (item && item.ok) {
+                    zip.file(item.name, item.blob);
+                    successCount += 1;
+                } else {
                     failedCount += 1;
                 }
             }
@@ -779,8 +821,7 @@
             const zipBlob = await zip.generateAsync(
                 {
                     type: "blob",
-                    compression: "DEFLATE",
-                    compressionOptions: { level: 5 }
+                    compression: "STORE"
                 },
                 function(meta) {
                     progressEl.textContent = "正在本地打包 ZIP..." + Math.floor(meta.percent) + "%";
