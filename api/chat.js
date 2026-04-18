@@ -6,8 +6,12 @@ const GENSHIN_PC_URL = "https://ys-api.mihoyo.com/event/download_porter/link/ys_
 const JM_UA = "Mozilla/5.0 (Linux; Android 10; K; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/130.0.0.0 Mobile Safari/537.36";
 const JM_APP_VERSION = process.env.JM_APP_VERSION || "2.0.19";
 const JM_APP_TOKEN_SECRET = process.env.JM_APP_TOKEN_SECRET || "18comicAPP";
+const JM_APP_TOKEN_SECRET_CONTENT = process.env.JM_APP_TOKEN_SECRET_CONTENT || "18comicAPPContent";
 const JM_APP_DATA_SECRET = process.env.JM_APP_DATA_SECRET || "185Hcomic3PAPP7R";
 const JM_DOMAIN_SERVER_SECRET = process.env.JM_DOMAIN_SERVER_SECRET || "diosfjckwpqpdfjkvnqQjsik";
+const JM_SCRAMBLE_220980 = 220980;
+const JM_SCRAMBLE_268850 = 268850;
+const JM_SCRAMBLE_421926 = 421926;
 
 const JM_DOMAIN_SERVER_URLS = [
   "https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt",
@@ -172,22 +176,22 @@ async function fetchDynamicDomains() {
   return [];
 }
 
-function makeJmHeaders(timestampSec) {
+function makeJmHeaders(timestampSec, tokenSecret = JM_APP_TOKEN_SECRET) {
   return {
     "Accept": "*/*",
     "User-Agent": JM_UA,
     "X-Requested-With": "com.example.app",
-    "token": md5Hex(`${timestampSec}${JM_APP_TOKEN_SECRET}`),
+    "token": md5Hex(`${timestampSec}${tokenSecret}`),
     "tokenparam": `${timestampSec},${JM_APP_VERSION}`
   };
 }
 
-async function callJmApiOnDomain(domain, routeWithQuery) {
+async function callJmApiOnDomain(domain, routeWithQuery, tokenSecret = JM_APP_TOKEN_SECRET) {
   const timestampSec = Math.floor(Date.now() / 1000).toString();
   const url = `https://${domain}${routeWithQuery}`;
   const response = await fetch(url, {
     method: "GET",
-    headers: makeJmHeaders(timestampSec)
+    headers: makeJmHeaders(timestampSec, tokenSecret)
   });
 
   if (!response.ok) {
@@ -212,6 +216,36 @@ async function callJmApiWithFallback(routeWithQuery) {
     try {
       const data = await callJmApiOnDomain(domain, routeWithQuery);
       return { data, domain };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error("All JM API domains failed");
+}
+
+async function callJmTextWithFallback(routeWithQuery, tokenSecret = JM_APP_TOKEN_SECRET) {
+  const dynamicDomains = await fetchDynamicDomains();
+  const domains = dedupeDomains([...readEnvDomainList(), ...dynamicDomains, ...JM_FALLBACK_DOMAINS]);
+
+  let lastError = null;
+  for (const domain of domains) {
+    try {
+      const timestampSec = Math.floor(Date.now() / 1000).toString();
+      const url = `https://${domain}${routeWithQuery}`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: makeJmHeaders(timestampSec, tokenSecret)
+      });
+
+      if (!response.ok) {
+        throw new Error(`JM API ${domain} returned ${response.status}`);
+      }
+
+      return {
+        text: await response.text(),
+        domain
+      };
     } catch (err) {
       lastError = err;
     }
@@ -273,6 +307,44 @@ async function getJmChapterImages(chapterId) {
     return data.images.map((imageName) => String(imageName));
   }
   return [];
+}
+
+async function getJmChapterScrambleId(chapterId) {
+  const route = `/chapter_view_template?id=${encodeURIComponent(chapterId)}&mode=vertical&page=0&app_img_shunt=1&express=off&v=${Date.now()}`;
+  try {
+    const { text } = await callJmTextWithFallback(route, JM_APP_TOKEN_SECRET_CONTENT);
+    const match = String(text || "").match(/var\s+scramble_id\s*=\s*(\d+)\s*;/i);
+    if (match && match[1]) {
+      return Number(match[1]);
+    }
+  } catch (err) {
+    // Fallback to default when endpoint is unstable.
+  }
+
+  return JM_SCRAMBLE_220980;
+}
+
+function getSegmentationNum(scrambleId, chapterId, imageName) {
+  const aid = Number(chapterId);
+  const sid = Number(scrambleId);
+  if (!Number.isFinite(aid) || !Number.isFinite(sid)) {
+    return 0;
+  }
+
+  if (aid < sid) {
+    return 0;
+  }
+
+  if (aid < JM_SCRAMBLE_268850) {
+    return 10;
+  }
+
+  const x = aid < JM_SCRAMBLE_421926 ? 10 : 8;
+  const baseName = String(imageName || "").replace(/\.[^.]+$/u, "");
+  const hashed = md5Hex(`${aid}${baseName}`);
+  const lastChar = hashed[hashed.length - 1] || "0";
+  const num = (lastChar.charCodeAt(0) % x) * 2 + 2;
+  return num;
 }
 
 function makeAlbumWebUrl(albumId) {
@@ -469,6 +541,7 @@ async function buildWebDownloadTask(albumId, albumData) {
     const chapterId = String(chapter.id || albumId);
     const chapterTitle = chapter && chapter.name ? String(chapter.name) : `第${chapterIndex + 1}话`;
     const imageNames = await getJmChapterImages(chapterId);
+    const scrambleId = await getJmChapterScrambleId(chapterId);
 
     for (let imageIndex = 0; imageIndex < imageNames.length; imageIndex += 1) {
       if (files.length >= JM_MAX_DOWNLOAD_FILES) {
@@ -481,7 +554,11 @@ async function buildWebDownloadTask(albumId, albumData) {
 
       files.push({
         url: `${imageHost}/media/photos/${chapterId}/${imageName}`,
-        name: fileName
+        name: fileName,
+        chapterId,
+        imageName,
+        scrambleId,
+        segmentation: getSegmentationNum(scrambleId, chapterId, imageName)
       });
     }
 
