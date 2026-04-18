@@ -354,6 +354,10 @@
 
     <script>
         const API_URL = "https://backend-lilac-alpha.vercel.app/api/chat";
+        const JSZIP_CDN_URLS = [
+            "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",
+            "https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"
+        ];
         const chatEl = document.getElementById("chat");
         const inputEl = document.getElementById("input");
         const sendBtnEl = document.getElementById("sendBtn");
@@ -377,6 +381,7 @@
         let systemPrompt = DEFAULT_SYSTEM_PROMPT;
         let eggClickTimestamps = [];
         let isEggOverlayActive = false;
+        let jsZipLoadPromise = null;
         const eggAudio = new Audio(EGG_AUDIO_PATH);
 
         eggAudio.preload = "auto";
@@ -540,18 +545,7 @@
             return url.toString();
         }
 
-        async function downloadBlob(url, fileName) {
-            const response = await fetch(url, {
-                method: "GET",
-                mode: "cors",
-                credentials: "omit"
-            });
-
-            if (!response.ok) {
-                throw new Error("下载失败：" + response.status);
-            }
-
-            const blob = await response.blob();
+        function saveBlobToFile(blob, fileName) {
             const objectUrl = URL.createObjectURL(blob);
 
             try {
@@ -569,6 +563,123 @@
             }
         }
 
+        async function fetchBlob(url, timeoutMs) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(function() {
+                controller.abort();
+            }, timeoutMs || 30000);
+
+            try {
+                const response = await fetch(url, {
+                    method: "GET",
+                    mode: "cors",
+                    credentials: "omit",
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    throw new Error("下载失败：" + response.status);
+                }
+
+                return await response.blob();
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        async function downloadBlob(url, fileName, timeoutMs) {
+            const blob = await fetchBlob(url, timeoutMs);
+            saveBlobToFile(blob, fileName);
+        }
+
+        async function loadScript(url) {
+            return new Promise(function(resolve, reject) {
+                const script = document.createElement("script");
+                script.src = url;
+                script.async = true;
+                script.onload = function() {
+                    resolve();
+                };
+                script.onerror = function() {
+                    reject(new Error("加载脚本失败"));
+                };
+                document.head.appendChild(script);
+            });
+        }
+
+        async function ensureJsZipLoaded() {
+            if (window.JSZip) {
+                return;
+            }
+
+            if (!jsZipLoadPromise) {
+                jsZipLoadPromise = (async function() {
+                    let lastError = null;
+                    for (const url of JSZIP_CDN_URLS) {
+                        try {
+                            await loadScript(url);
+                            if (window.JSZip) {
+                                return;
+                            }
+                        } catch (err) {
+                            lastError = err;
+                        }
+                    }
+                    throw lastError || new Error("无法加载 JSZip");
+                })();
+            }
+
+            await jsZipLoadPromise;
+        }
+
+        async function buildZipInBrowser(task, progressEl) {
+            const files = Array.isArray(task && task.files) ? task.files : [];
+            if (!files.length) {
+                throw new Error("下载清单为空");
+            }
+
+            await ensureJsZipLoaded();
+            const zip = new window.JSZip();
+            let successCount = 0;
+            let failedCount = 0;
+
+            for (let i = 0; i < files.length; i += 1) {
+                const file = files[i];
+                progressEl.textContent = "正在拉取文件 " + (i + 1) + " / " + files.length;
+
+                try {
+                    const proxyUrl = buildJmProxyDownloadUrl(file.url, file.name);
+                    const fileBlob = await fetchBlob(proxyUrl, 30000);
+                    zip.file(file.name || ("image_" + (i + 1) + ".jpg"), fileBlob);
+                    successCount += 1;
+                } catch (err) {
+                    failedCount += 1;
+                }
+            }
+
+            if (successCount === 0) {
+                throw new Error("所有文件拉取失败");
+            }
+
+            progressEl.textContent = "正在本地打包 ZIP...";
+            const zipBlob = await zip.generateAsync(
+                {
+                    type: "blob",
+                    compression: "DEFLATE",
+                    compressionOptions: { level: 5 }
+                },
+                function(meta) {
+                    progressEl.textContent = "正在本地打包 ZIP..." + Math.floor(meta.percent) + "%";
+                }
+            );
+
+            return {
+                blob: zipBlob,
+                successCount,
+                failedCount
+            };
+        }
+
         async function startJmZipDownload(task, progressEl, downloadBtn) {
             const zipUrl = task && task.zipUrl;
             if (!zipUrl) {
@@ -577,12 +688,19 @@
             }
 
             downloadBtn.disabled = true;
-            progressEl.textContent = "正在生成 ZIP 并开始下载...";
+            progressEl.textContent = "正在请求服务器 ZIP...";
             try {
-                await downloadBlob(zipUrl, task.zipFileName || (task.albumTitle ? task.albumTitle + ".zip" : "jm-download.zip"));
-                progressEl.textContent = "ZIP 下载已开始";
+                await downloadBlob(zipUrl, task.zipFileName || (task.albumTitle ? task.albumTitle + ".zip" : "jm-download.zip"), 35000);
+                progressEl.textContent = "ZIP 下载已开始（服务器打包）";
             } catch (err) {
-                progressEl.textContent = "ZIP 下载失败：" + err.message;
+                try {
+                    progressEl.textContent = "服务器打包失败，正在切换本地打包...";
+                    const localZip = await buildZipInBrowser(task, progressEl);
+                    saveBlobToFile(localZip.blob, task.zipFileName || (task.albumTitle ? task.albumTitle + ".zip" : "jm-download.zip"));
+                    progressEl.textContent = "ZIP 下载已开始（本地打包，成功 " + localZip.successCount + "，失败 " + localZip.failedCount + "）";
+                } catch (fallbackErr) {
+                    progressEl.textContent = "ZIP 下载失败：" + (fallbackErr && fallbackErr.message ? fallbackErr.message : err.message);
+                }
             } finally {
                 downloadBtn.disabled = false;
             }
