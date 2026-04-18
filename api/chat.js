@@ -26,6 +26,9 @@ const JM_ALBUM_WEB_BASE = process.env.JM_ALBUM_WEB_BASE || "https://18comic.vip/
 const JM_IMAGE_BASE_DEFAULT = process.env.JM_IMAGE_BASE_DEFAULT || "https://cdn-msp.jmapinodeudzn.net";
 const JM_MAX_DOWNLOAD_FILES = Number(process.env.JM_MAX_DOWNLOAD_FILES || 220);
 const PUBLIC_API_BASE_URL = process.env.PUBLIC_API_BASE_URL || "https://backend-lilac-alpha.vercel.app";
+const JM_ZIP_FETCH_CONCURRENCY = Number(process.env.JM_ZIP_FETCH_CONCURRENCY || 6);
+const JM_ZIP_FETCH_TIMEOUT_MS = Number(process.env.JM_ZIP_FETCH_TIMEOUT_MS || 15000);
+const JM_ZIP_FETCH_RETRY = Number(process.env.JM_ZIP_FETCH_RETRY || 2);
 
 const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -394,6 +397,64 @@ function sanitizeZipFileName(name) {
   return safe ? `${safe}.zip` : "jm-download.zip";
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) {
+        return;
+      }
+
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = [];
+  for (let index = 0; index < workerCount; index += 1) {
+    workers.push(worker());
+  }
+
+  await Promise.all(workers);
+  return results;
+}
+
+async function fetchBinaryWithRetry(url, retryCount = JM_ZIP_FETCH_RETRY) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), JM_ZIP_FETCH_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": JM_UA,
+          "Referer": "https://localhost/"
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upstream error ${response.status}`);
+      }
+
+      return Buffer.from(await response.arrayBuffer());
+    } catch (err) {
+      lastError = err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  throw lastError || new Error("Failed to fetch binary");
+}
+
 async function buildWebDownloadTask(albumId, albumData) {
   const title = albumData && albumData.name ? String(albumData.name) : `JM${albumId}`;
   const rawSeries = Array.isArray(albumData && albumData.series) ? albumData.series : [];
@@ -523,11 +584,29 @@ async function handleJmZipDownload(req, res) {
       return res.status(404).json({ error: "No files to zip" });
     }
 
-    const entries = [];
-    for (const file of task.files) {
-      entries.push({
-        name: file.name,
-        data: await fetchBinary(file.url)
+    const fetched = await mapWithConcurrency(task.files, JM_ZIP_FETCH_CONCURRENCY, async (file) => {
+      try {
+        const data = await fetchBinaryWithRetry(file.url);
+        return { ok: true, name: file.name, data };
+      } catch (err) {
+        return {
+          ok: false,
+          name: file.name,
+          error: err instanceof Error ? err.message : String(err)
+        };
+      }
+    });
+
+    const entries = fetched.filter((item) => item && item.ok).map((item) => ({
+      name: item.name,
+      data: item.data
+    }));
+
+    const failed = fetched.filter((item) => item && !item.ok);
+    if (entries.length === 0) {
+      return res.status(502).json({
+        error: "All files failed to download",
+        failed: failed.slice(0, 8)
       });
     }
 
