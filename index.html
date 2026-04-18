@@ -192,6 +192,62 @@
             color: #9ca3af;
         }
 
+        .jm-card {
+            max-width: var(--max-content-width);
+            margin: 8px auto 0;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: #ffffff;
+            padding: 12px;
+            box-shadow: 0 3px 14px rgba(17, 24, 39, 0.03);
+        }
+
+        .jm-card-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin: 0 0 6px;
+            color: #111827;
+        }
+
+        .jm-card-meta {
+            font-size: 12px;
+            color: #6b7280;
+            margin: 0 0 10px;
+        }
+
+        .jm-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .jm-btn {
+            border: 1px solid #d1d5db;
+            background: #f8fafc;
+            color: #111827;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .jm-btn.primary {
+            background: #111827;
+            color: #ffffff;
+            border-color: #111827;
+        }
+
+        .jm-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        .jm-progress {
+            margin: 10px 0 0;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
         .egg-overlay {
             position: fixed;
             inset: 0;
@@ -476,6 +532,102 @@
             document.body.removeChild(link);
         }
 
+        function buildJmProxyDownloadUrl(fileUrl, fileName) {
+            const url = new URL(API_URL);
+            url.searchParams.set("action", "jm-file");
+            url.searchParams.set("url", fileUrl);
+            url.searchParams.set("filename", fileName || "image.jpg");
+            return url.toString();
+        }
+
+        function wait(ms) {
+            return new Promise(function(resolve) {
+                setTimeout(resolve, ms);
+            });
+        }
+
+        function startJmZipDownload(task, progressEl, downloadBtn) {
+            const zipUrl = task && task.zipUrl;
+            if (!zipUrl) {
+                progressEl.textContent = "没有可用的 ZIP 链接";
+                return;
+            }
+
+            downloadBtn.disabled = true;
+            progressEl.textContent = "正在生成 ZIP 并开始下载...";
+            triggerDownload(zipUrl);
+            setTimeout(function() {
+                progressEl.textContent = "如果浏览器允许下载，ZIP 应该已经开始了";
+                downloadBtn.disabled = false;
+            }, 800);
+        }
+
+        function addJmDownloadCard(task) {
+            if (!task || !Array.isArray(task.files) || !task.files.length) {
+                return;
+            }
+
+            if (emptyStateEl) {
+                emptyStateEl.style.display = "none";
+            }
+
+            const row = document.createElement("div");
+            row.className = "message-row";
+
+            const wrap = document.createElement("div");
+            wrap.className = "message-wrap assistant";
+
+            const card = document.createElement("div");
+            card.className = "jm-card";
+
+            const title = document.createElement("p");
+            title.className = "jm-card-title";
+            title.textContent = "JM 网页下载：" + (task.albumTitle || ("JM" + task.albumId));
+
+            const meta = document.createElement("p");
+            meta.className = "jm-card-meta";
+            meta.textContent = "车号 " + task.albumId + " · 文件数 " + task.files.length + (task.truncated ? ("（已截断，最多 " + task.maxFiles + "）") : "");
+
+            const actions = document.createElement("div");
+            actions.className = "jm-actions";
+
+            const downloadBtn = document.createElement("button");
+            downloadBtn.type = "button";
+            downloadBtn.className = "jm-btn primary";
+            downloadBtn.textContent = "一键 ZIP 下载";
+
+            const openBtn = document.createElement("button");
+            openBtn.type = "button";
+            openBtn.className = "jm-btn";
+            openBtn.textContent = "打开在线页面";
+
+            const progress = document.createElement("p");
+            progress.className = "jm-progress";
+            progress.textContent = "点击按钮开始下载";
+
+            downloadBtn.addEventListener("click", function() {
+                startJmZipDownload(task, progress, downloadBtn);
+            });
+
+            openBtn.addEventListener("click", function() {
+                if (task.albumUrl) {
+                    triggerDownload(task.albumUrl);
+                }
+            });
+
+            actions.appendChild(downloadBtn);
+            actions.appendChild(openBtn);
+
+            card.appendChild(title);
+            card.appendChild(meta);
+            card.appendChild(actions);
+            card.appendChild(progress);
+            wrap.appendChild(card);
+            row.appendChild(wrap);
+            chatEl.appendChild(row);
+            scrollToBottom();
+        }
+
         function pickRandomEggImagePath() {
             if (!EGG_IMAGE_PATHS.length) {
                 return "";
@@ -598,7 +750,9 @@
                 addMessage("assistant", reply);
                 messages.push({ role: "assistant", content: reply });
 
-                if (data.downloadUrl) {
+                if (data.jmDownload) {
+                    addJmDownloadCard(data.jmDownload);
+                } else if (data.downloadUrl) {
                     triggerDownload(data.downloadUrl);
                 }
             } catch (err) {
