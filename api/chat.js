@@ -42,8 +42,8 @@ export default async function handler(req, res) {
     const mobile = isMobileUserAgent(ua);
     const downloadUrl = mobile ? GENSHIN_MOBILE_APK_URL : GENSHIN_PC_URL;
     const reply = mobile
-      ? "检测到你提到了“原神”，已为你准备手机版 APK 下载。"
-      : "检测到你提到了“原神”，已为你准备电脑版下载。";
+      ? "你提到了原神对吧？心怀感激的收下吧"
+      : "你提到了原神对吧？满怀期待的收下吧";
 
     return res.status(200).json({
       reply,
