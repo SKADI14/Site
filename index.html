@@ -587,8 +587,34 @@
             }
         }
 
+        function isRetriableError(error) {
+            const msg = error && error.message ? String(error.message) : "";
+            return /超时|timeout|502|503|504|ERR_CONNECTION_CLOSED|Failed to fetch|NetworkError/i.test(msg);
+        }
+
+        async function fetchBlobWithRetry(url, timeoutMs, retryCount) {
+            let lastError = null;
+            const retries = typeof retryCount === "number" ? retryCount : 2;
+
+            for (let attempt = 0; attempt <= retries; attempt += 1) {
+                try {
+                    return await fetchBlob(url, timeoutMs);
+                } catch (err) {
+                    lastError = err;
+                    if (attempt >= retries || !isRetriableError(err)) {
+                        throw err;
+                    }
+                    await new Promise(function(resolve) {
+                        setTimeout(resolve, 500 * (attempt + 1));
+                    });
+                }
+            }
+
+            throw lastError || new Error("下载失败");
+        }
+
         async function downloadBlob(url, fileName, timeoutMs) {
-            const blob = await fetchBlob(url, timeoutMs);
+            const blob = await fetchBlobWithRetry(url, timeoutMs, 2);
             saveBlobToFile(blob, fileName);
         }
 
@@ -649,7 +675,7 @@
 
                 try {
                     const proxyUrl = buildJmProxyDownloadUrl(file.url, file.name);
-                    const fileBlob = await fetchBlob(proxyUrl, 30000);
+                    const fileBlob = await fetchBlobWithRetry(proxyUrl, 30000, 2);
                     zip.file(file.name || ("image_" + (i + 1) + ".jpg"), fileBlob);
                     successCount += 1;
                 } catch (err) {
@@ -690,7 +716,7 @@
             downloadBtn.disabled = true;
             progressEl.textContent = "正在请求服务器 ZIP...";
             try {
-                await downloadBlob(zipUrl, task.zipFileName || (task.albumTitle ? task.albumTitle + ".zip" : "jm-download.zip"), 35000);
+                await downloadBlob(zipUrl, task.zipFileName || (task.albumTitle ? task.albumTitle + ".zip" : "jm-download.zip"), 50000);
                 progressEl.textContent = "ZIP 下载已开始（服务器打包）";
             } catch (err) {
                 try {
