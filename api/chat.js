@@ -25,6 +25,7 @@ const JM_FALLBACK_DOMAINS = [
 const JM_ALBUM_WEB_BASE = process.env.JM_ALBUM_WEB_BASE || "https://18comic.vip/album/";
 const JM_IMAGE_BASE_DEFAULT = process.env.JM_IMAGE_BASE_DEFAULT || "https://cdn-msp.jmapinodeudzn.net";
 const JM_MAX_DOWNLOAD_FILES = Number(process.env.JM_MAX_DOWNLOAD_FILES || 220);
+const PUBLIC_API_BASE_URL = process.env.PUBLIC_API_BASE_URL || "https://backend-lilac-alpha.vercel.app";
 
 const CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -275,6 +276,10 @@ function makeAlbumWebUrl(albumId) {
   return `${JM_ALBUM_WEB_BASE}${albumId}`;
 }
 
+function makeApiUrl(pathname) {
+  return new URL(pathname, PUBLIC_API_BASE_URL).toString();
+}
+
 function toSafeFileName(name) {
   return String(name || "")
     .replace(/[\\/:*?"<>|]+/g, "_")
@@ -428,7 +433,7 @@ async function buildWebDownloadTask(albumId, albumData) {
     albumId: String(albumId),
     albumTitle: title,
     albumUrl: makeAlbumWebUrl(albumId),
-    zipUrl: `/api/chat?action=jm-zip&albumId=${encodeURIComponent(albumId)}`,
+    zipUrl: makeApiUrl(`/api/chat?action=jm-zip&albumId=${encodeURIComponent(albumId)}`),
     zipFileName: sanitizeZipFileName(title),
     files,
     truncated: files.length >= JM_MAX_DOWNLOAD_FILES,
