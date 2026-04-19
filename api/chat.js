@@ -91,11 +91,13 @@ const DEEPSEEK_TOOLS = [
         properties: {
           keyword: {
             type: "string",
-            description: "搜索关键词，例如作者名、作品名或标签。"
+            description: "搜索关键词，例如作者名、作品名或标签。",
+            default: "原神"
           },
           limit: {
             type: "integer",
             description: "返回数量上限，建议 1-10。",
+            default: 5,
             minimum: 1,
             maximum: 10
           }
@@ -224,10 +226,7 @@ async function executeToolCall(toolCall, req, uiPayload) {
   const args = safeJsonParse(argsText) || {};
 
   if (toolName === "search_jm_albums") {
-    const keyword = normalizeText(args.keyword);
-    if (!keyword) {
-      return { error: "keyword 不能为空" };
-    }
+    const keyword = normalizeText(args.keyword) || "原神";
 
     const limit = clampInteger(args.limit, 1, 10, 5);
     const result = await searchJmAlbums(keyword);
