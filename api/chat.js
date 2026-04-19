@@ -53,21 +53,6 @@ function isMobileUserAgent(userAgent) {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
 }
 
-function getLastUserMessage(messages) {
-  if (!Array.isArray(messages)) {
-    return "";
-  }
-
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message && message.role === "user" && typeof message.content === "string") {
-      return message.content;
-    }
-  }
-
-  return "";
-}
-
 function md5Hex(text) {
   return crypto.createHash("md5").update(text, "utf8").digest("hex");
 }
@@ -89,41 +74,243 @@ function normalizeText(text) {
   return typeof text === "string" ? text.trim() : "";
 }
 
-function extractSearchKeyword(message) {
-  const text = normalizeText(message);
-  if (!text) {
-    return "";
+const DEEPSEEK_API_BASE = process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com";
+const DEEPSEEK_BETA_API_BASE = process.env.DEEPSEEK_BETA_API_BASE || "https://api.deepseek.com/beta";
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+const TOOL_LOOP_LIMIT = Math.max(1, Number(process.env.DEEPSEEK_TOOL_LOOP_LIMIT || 4));
+
+const DEEPSEEK_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "search_jm_albums",
+      strict: true,
+      description: "搜索 JM 本子并返回结果列表。",
+      parameters: {
+        type: "object",
+        properties: {
+          keyword: {
+            type: "string",
+            description: "搜索关键词，例如作者名、作品名或标签。"
+          },
+          limit: {
+            type: "integer",
+            description: "返回数量上限，建议 1-10。",
+            minimum: 1,
+            maximum: 10
+          }
+        },
+        required: ["keyword", "limit"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "prepare_jm_download",
+      strict: true,
+      description: "按 JM 车号生成网页下载任务。",
+      parameters: {
+        type: "object",
+        properties: {
+          albumId: {
+            type: "string",
+            description: "JM 车号，仅数字字符串。",
+            pattern: "^\\d{3,}$"
+          }
+        },
+        required: ["albumId"],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_genshin_download",
+      strict: true,
+      description: "获取原神下载链接。",
+      parameters: {
+        type: "object",
+        properties: {
+          platform: {
+            type: "string",
+            description: "下载平台。auto 会按用户设备自动判断。",
+            enum: ["auto", "mobile", "pc"]
+          }
+        },
+        required: ["platform"],
+        additionalProperties: false
+      }
+    }
+  }
+];
+
+const TOOL_CALL_SYSTEM_PROMPT = [
+  "你是网站内置智能助手，可调用工具完成搜索和下载准备。",
+  "规则：",
+  "1. 当用户表达搜本子、找作品、下载车号、原神下载等意图时，优先调用对应工具，不要臆造结果。",
+  "2. 若信息不足，先用自然语言追问，不要盲目调用工具。",
+  "3. 工具结果会以 tool 消息返回，你要基于工具结果给出中文答复。",
+  "4. 如果工具执行失败，要给出简短可操作的建议。"
+].join("\n");
+
+const JSON_MODE_SYSTEM_PROMPT = [
+  "请将最终答复整理为 json 对象。",
+  "只输出合法 json 字符串，不要输出 markdown。",
+  "json schema:",
+  '{"reply":"string"}'
+].join("\n");
+
+function safeJsonParse(text) {
+  if (typeof text !== "string" || !text.trim()) {
+    return null;
   }
 
-  const explicit = text.match(/(?:帮我|请)?(?:找|搜)(?:一个|一下)?(.+?)(?:的)?本子/);
-  if (explicit && explicit[1]) {
-    return explicit[1].trim();
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
   }
-
-  if (text.startsWith("搜本子") || text.startsWith("搜索本子")) {
-    return text.replace(/^搜索?本子[:：\s]*/u, "").trim();
-  }
-
-  return "";
 }
 
-function extractDownloadAlbumId(message) {
-  const text = normalizeText(message);
-  if (!text) {
-    return "";
+function clampInteger(value, minValue, maxValue, defaultValue) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return defaultValue;
   }
 
-  const explicit = text.match(/(?:帮我|请)?下载\s*(?:jm)?\s*(\d{3,})\s*(?:的)?本子?/i);
-  if (explicit && explicit[1]) {
-    return explicit[1];
+  return Math.min(maxValue, Math.max(minValue, Math.floor(number)));
+}
+
+async function callDeepSeekChat(payload, options = {}) {
+  const useBeta = options.useBeta === true;
+  const baseUrl = useBeta ? DEEPSEEK_BETA_API_BASE : DEEPSEEK_API_BASE;
+  const endpoint = `${baseUrl.replace(/\/+$/u, "")}/chat/completions`;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    const message = data && data.error && data.error.message
+      ? String(data.error.message)
+      : `DeepSeek API error ${response.status}`;
+    throw new Error(message);
   }
 
-  const generic = text.match(/(?:下载|下本子)\s*(?:jm)?\s*(\d{3,})/i);
-  if (generic && generic[1]) {
-    return generic[1];
+  return data;
+}
+
+function resolveGenshinPlatform(platform, req) {
+  if (platform === "mobile" || platform === "pc") {
+    return platform;
   }
 
-  return "";
+  const ua = req.headers["user-agent"] || "";
+  return isMobileUserAgent(ua) ? "mobile" : "pc";
+}
+
+async function executeToolCall(toolCall, req, uiPayload) {
+  const toolName = toolCall && toolCall.function ? toolCall.function.name : "";
+  const argsText = toolCall && toolCall.function ? toolCall.function.arguments : "";
+  const args = safeJsonParse(argsText) || {};
+
+  if (toolName === "search_jm_albums") {
+    const keyword = normalizeText(args.keyword);
+    if (!keyword) {
+      return { error: "keyword 不能为空" };
+    }
+
+    const limit = clampInteger(args.limit, 1, 10, 5);
+    const result = await searchJmAlbums(keyword);
+    return {
+      keyword,
+      total: result.total,
+      items: result.items.slice(0, limit)
+    };
+  }
+
+  if (toolName === "prepare_jm_download") {
+    const albumId = String(args.albumId || "").trim();
+    if (!/^\d{3,}$/u.test(albumId)) {
+      return { error: "albumId 格式无效" };
+    }
+
+    const album = await getJmAlbumDetail(albumId);
+    const title = album && album.data && album.data.name ? String(album.data.name) : "";
+    const task = await buildWebDownloadTask(albumId, album.data);
+    uiPayload.jmDownload = task;
+
+    return {
+      albumId,
+      title,
+      fileCount: Array.isArray(task.files) ? task.files.length : 0,
+      truncated: Boolean(task.truncated),
+      maxFiles: task.maxFiles,
+      albumUrl: task.albumUrl
+    };
+  }
+
+  if (toolName === "get_genshin_download") {
+    const finalPlatform = resolveGenshinPlatform(args.platform, req);
+    const downloadUrl = finalPlatform === "mobile" ? GENSHIN_MOBILE_APK_URL : GENSHIN_PC_URL;
+    uiPayload.downloadUrl = downloadUrl;
+
+    return {
+      platform: finalPlatform,
+      downloadUrl,
+      tip: finalPlatform === "mobile"
+        ? "已按移动端准备下载链接。"
+        : "已按桌面端准备下载链接。"
+    };
+  }
+
+  return { error: `未知工具: ${toolName}` };
+}
+
+async function normalizeReplyByJsonMode(messages, fallbackReply) {
+  const data = await callDeepSeekChat({
+    model: DEEPSEEK_MODEL,
+    messages: [
+      { role: "system", content: JSON_MODE_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          "请根据下面对话上下文整理最终答复，并按 json 返回。",
+          "json",
+          JSON.stringify(messages)
+        ].join("\n")
+      }
+    ],
+    response_format: {
+      type: "json_object"
+    },
+    max_tokens: 512
+  });
+
+  const content = data
+    && data.choices
+    && data.choices[0]
+    && data.choices[0].message
+    && typeof data.choices[0].message.content === "string"
+    ? data.choices[0].message.content
+    : "";
+
+  const parsed = safeJsonParse(content);
+  const reply = parsed && typeof parsed.reply === "string" ? parsed.reply.trim() : "";
+  if (reply) {
+    return reply;
+  }
+
+  return fallbackReply;
 }
 
 function readEnvDomainList() {
@@ -579,41 +766,6 @@ async function buildWebDownloadTask(albumId, albumData) {
   };
 }
 
-function formatSearchReply(keyword, result) {
-  if (!result.items.length) {
-    return `没有搜到“${keyword}”相关本子。你可以换一个关键词试试。`;
-  }
-
-  const lines = [];
-  lines.push(`帮你搜到了“${keyword}”相关结果（共 ${result.total} 条，展示前 5 条）：`);
-
-  const top = result.items.slice(0, 5);
-  for (let i = 0; i < top.length; i += 1) {
-    const item = top[i];
-    lines.push(`${i + 1}. [${item.id}] ${item.title} - ${item.author}`);
-  }
-
-  lines.push("你可以继续说：帮我下载<编号>的本子");
-  return lines.join("\n");
-}
-
-function formatDownloadReply(albumId, title, task) {
-  const lines = [];
-  lines.push(`已定位本子 JM${albumId}：${title || "(无标题)"}`);
-
-  if (task && Array.isArray(task.files) && task.files.length > 0) {
-    lines.push(`网页已准备好下载任务，共 ${task.files.length} 张图片。`);
-    lines.push("点击下面的“开始网页下载”按钮即可下载到本地。 ");
-    if (task.truncated) {
-      lines.push(`为了避免浏览器卡顿，本次最多准备 ${task.maxFiles} 张。`);
-    }
-  } else {
-    lines.push("未能生成图片下载清单，你可以先打开在线页面查看。 ");
-  }
-
-  return lines.join("\n");
-}
-
 function getQueryValue(req, key) {
   if (!req || !req.query) {
     return "";
@@ -770,72 +922,91 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const lastUserMessage = getLastUserMessage(req.body && req.body.messages);
-  if (lastUserMessage.includes("原神")) {
-    const ua = req.headers["user-agent"] || "";
-    const mobile = isMobileUserAgent(ua);
-    const downloadUrl = mobile ? GENSHIN_MOBILE_APK_URL : GENSHIN_PC_URL;
-    const reply = mobile
-      ? "你提到了原神对吧？心怀感激的收下吧"
-      : "你提到了原神对吧？满怀期待的收下吧";
-
-    return res.status(200).json({
-      reply,
-      downloadUrl
-    });
-  }
-
-  const searchKeyword = extractSearchKeyword(lastUserMessage);
-  if (searchKeyword) {
-    try {
-      const result = await searchJmAlbums(searchKeyword);
-      return res.status(200).json({
-        reply: formatSearchReply(searchKeyword, result)
-      });
-    } catch (err) {
-      return res.status(200).json({
-        reply: `JM 搜索失败：${err instanceof Error ? err.message : String(err)}`
-      });
-    }
-  }
-
-  const albumId = extractDownloadAlbumId(lastUserMessage);
-  if (albumId) {
-    try {
-      const album = await getJmAlbumDetail(albumId);
-      const title = album && album.data && album.data.name ? String(album.data.name) : "";
-      const task = await buildWebDownloadTask(albumId, album.data);
-
-      return res.status(200).json({
-        reply: formatDownloadReply(albumId, title, task),
-        jmDownload: task
-      });
-    } catch (err) {
-      return res.status(200).json({
-        reply: `JM 下载失败：${err instanceof Error ? err.message : String(err)}`
-      });
-    }
-  }
-
   try {
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: req.body.messages
-      })
-    });
+    const incomingMessages = Array.isArray(req.body && req.body.messages)
+      ? req.body.messages
+      : [];
 
-    const data = await response.json();
+    const toolMessages = [
+      { role: "system", content: TOOL_CALL_SYSTEM_PROMPT },
+      ...incomingMessages
+    ];
 
-    res.status(200).json({
-      reply: data.choices[0].message.content
-    });
+    const uiPayload = {
+      downloadUrl: null,
+      jmDownload: null
+    };
 
+    let finalReply = "";
+
+    for (let loopIndex = 0; loopIndex < TOOL_LOOP_LIMIT; loopIndex += 1) {
+      const toolPlanData = await callDeepSeekChat({
+        model: DEEPSEEK_MODEL,
+        messages: toolMessages,
+        tools: DEEPSEEK_TOOLS
+      }, { useBeta: true });
+
+      const assistantMessage = toolPlanData
+        && toolPlanData.choices
+        && toolPlanData.choices[0]
+        && toolPlanData.choices[0].message
+        ? toolPlanData.choices[0].message
+        : null;
+
+      if (!assistantMessage) {
+        throw new Error("DeepSeek 未返回有效 assistant 消息");
+      }
+
+      toolMessages.push(assistantMessage);
+
+      const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
+      if (!toolCalls.length) {
+        finalReply = typeof assistantMessage.content === "string" ? assistantMessage.content : "";
+        break;
+      }
+
+      for (const toolCall of toolCalls) {
+        let toolResult;
+        try {
+          toolResult = await executeToolCall(toolCall, req, uiPayload);
+        } catch (err) {
+          toolResult = {
+            error: err instanceof Error ? err.message : String(err)
+          };
+        }
+
+        toolMessages.push({
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: JSON.stringify(toolResult)
+        });
+      }
+    }
+
+    if (!finalReply) {
+      finalReply = "处理完成，但暂时没有可展示的文本结果。";
+    }
+
+    let normalizedReply = finalReply;
+    try {
+      normalizedReply = await normalizeReplyByJsonMode(toolMessages, finalReply);
+    } catch (err) {
+      normalizedReply = finalReply;
+    }
+
+    const responseBody = {
+      reply: normalizedReply
+    };
+
+    if (uiPayload.jmDownload) {
+      responseBody.jmDownload = uiPayload.jmDownload;
+    }
+
+    if (uiPayload.downloadUrl) {
+      responseBody.downloadUrl = uiPayload.downloadUrl;
+    }
+
+    res.status(200).json(responseBody);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
