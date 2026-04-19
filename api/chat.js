@@ -195,7 +195,7 @@ function parseContinuationIntent(text) {
 function deriveSearchHistoryContext(messages) {
   let hasSearch = false;
   let keyword = "";
-  let pageSize = 5;
+  let pageSize = 10;
   let shownCount = 0;
 
   const list = Array.isArray(messages) ? messages : [];
@@ -207,7 +207,7 @@ function deriveSearchHistoryContext(messages) {
     const content = message.content;
     const explicitSearch = parseSearchIntentByRegex(content);
     if (explicitSearch.isSearch && explicitSearch.keyword) {
-      const nextPageSize = clampInteger(explicitSearch.limit, 1, 10, 5);
+      const nextPageSize = clampInteger(explicitSearch.limit, 1, 20, 10);
       hasSearch = true;
       keyword = explicitSearch.keyword;
       pageSize = nextPageSize;
@@ -217,7 +217,7 @@ function deriveSearchHistoryContext(messages) {
 
     const continuation = parseContinuationIntent(content);
     if (continuation.isContinue && hasSearch) {
-      const nextPageSize = clampInteger(continuation.limit, 1, 10, pageSize);
+      const nextPageSize = clampInteger(continuation.limit, 1, 20, pageSize);
       shownCount += nextPageSize;
       pageSize = nextPageSize;
     }
@@ -313,10 +313,10 @@ const DEEPSEEK_TOOLS = [
           },
           limit: {
             type: "integer",
-            description: "返回数量上限，建议 1-10。",
-            default: 5,
+            description: "返回数量上限，建议 1-20。",
+            default: 10,
             minimum: 1,
-            maximum: 10
+            maximum: 20
           }
         },
         required: ["keyword", "limit"],
@@ -454,8 +454,8 @@ async function executeToolCall(toolCall, req, uiPayload) {
     const limit = clampInteger(
       aiIntent.limit != null ? aiIntent.limit : (regexIntent.limit != null ? regexIntent.limit : args.limit),
       1,
-      10,
-      5
+      20,
+      10
     );
     const result = await searchJmAlbumsWindow(keyword, 0, limit);
     const items = result.items;
@@ -1229,7 +1229,7 @@ export default async function handler(req, res) {
         });
       }
 
-      const limit = clampInteger(continuationIntent.limit, 1, 10, historySearchContext.pageSize || 5);
+      const limit = clampInteger(continuationIntent.limit, 1, 20, historySearchContext.pageSize || 10);
       const offset = Math.max(0, historySearchContext.shownCount || 0);
       const keyword = historySearchContext.keyword;
       const result = await searchJmAlbumsWindow(keyword, offset, limit);
