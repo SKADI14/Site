@@ -297,7 +297,18 @@ const DEEPSEEK_API_BASE = process.env.DEEPSEEK_API_BASE || "https://api.deepseek
 const DEEPSEEK_BETA_API_BASE = process.env.DEEPSEEK_BETA_API_BASE || "https://api.deepseek.com/beta";
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
 const TOOL_LOOP_LIMIT = Math.max(1, Number(process.env.DEEPSEEK_TOOL_LOOP_LIMIT || 4));
-const ENABLE_AGENT_DEBUG_LOG = String(process.env.AGENT_DEBUG_LOG || "").toLowerCase() === "true";
+
+function isEnabledEnv(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "true"
+    || normalized === "1"
+    || normalized === "on"
+    || normalized === "yes"
+    || normalized === "enable"
+    || normalized === "enabled";
+}
+
+const ENABLE_AGENT_DEBUG_LOG = isEnabledEnv(process.env.AGENT_DEBUG_LOG);
 
 function debugLog(scope, payload = null) {
   if (!ENABLE_AGENT_DEBUG_LOG) {
