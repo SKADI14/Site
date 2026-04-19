@@ -297,6 +297,23 @@ const DEEPSEEK_API_BASE = process.env.DEEPSEEK_API_BASE || "https://api.deepseek
 const DEEPSEEK_BETA_API_BASE = process.env.DEEPSEEK_BETA_API_BASE || "https://api.deepseek.com/beta";
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
 const TOOL_LOOP_LIMIT = Math.max(1, Number(process.env.DEEPSEEK_TOOL_LOOP_LIMIT || 4));
+const ENABLE_AGENT_DEBUG_LOG = String(process.env.AGENT_DEBUG_LOG || "").toLowerCase() === "true";
+
+function debugLog(scope, payload = null) {
+  if (!ENABLE_AGENT_DEBUG_LOG) {
+    return;
+  }
+
+  try {
+    if (payload == null) {
+      console.log(`[chat-debug] ${scope}`);
+      return;
+    }
+    console.log(`[chat-debug] ${scope} ${JSON.stringify(payload)}`);
+  } catch (err) {
+    console.log(`[chat-debug] ${scope} [unserializable-payload]`);
+  }
+}
 
 const DEEPSEEK_TOOLS = [
   {
@@ -444,6 +461,11 @@ async function executeToolCall(toolCall, req, uiPayload) {
   const argsText = toolCall && toolCall.function ? toolCall.function.arguments : "";
   const args = safeJsonParse(argsText) || {};
 
+  debugLog("tool.execute.begin", {
+    toolName,
+    hasArgs: Boolean(argsText)
+  });
+
   if (toolName === "search_jm_albums") {
     const aiIntent = uiPayload.aiSearchIntent || { isSearch: false, keyword: "", limit: null };
     const regexIntent = uiPayload.regexSearchIntent || { isSearch: false, keyword: "", limit: null };
@@ -460,8 +482,22 @@ async function executeToolCall(toolCall, req, uiPayload) {
           : args.limit))
       : 10;
     const limit = clampInteger(limitRaw, 1, 20, 10);
+    const source = cleanupSearchKeyword(aiIntent.keyword)
+      ? "ai"
+      : (cleanupSearchKeyword(regexIntent.keyword)
+        ? "regex"
+        : (cleanupSearchKeyword(keywordFromArgs) ? "tool-args" : "default"));
     const result = await searchJmAlbumsWindow(keyword, 0, limit);
     const items = result.items;
+
+    debugLog("search.execute", {
+      keyword,
+      limit,
+      source,
+      total: result.total,
+      returned: items.length,
+      explicitLimit: uiPayload.userExplicitLimit
+    });
 
     if (!items.length) {
       uiPayload.replyOverride = `没有搜到“${keyword}”相关本子。你可以换一个关键词试试。`;
@@ -1225,6 +1261,13 @@ export default async function handler(req, res) {
     const continuationIntent = parseContinuationIntent(lastUserMessage);
     const historySearchContext = deriveSearchHistoryContext(historyMessages);
 
+    debugLog("request.begin", {
+      messageCount: incomingMessages.length,
+      lastUserMessage,
+      continuationIntent,
+      historySearchContext
+    });
+
     if (continuationIntent.isContinue) {
       if (!historySearchContext.hasSearch || !historySearchContext.keyword) {
         return res.status(200).json({
@@ -1237,6 +1280,14 @@ export default async function handler(req, res) {
       const keyword = historySearchContext.keyword;
       const result = await searchJmAlbumsWindow(keyword, offset, limit);
       const items = result.items;
+
+      debugLog("search.continue", {
+        keyword,
+        offset,
+        limit,
+        total: result.total,
+        returned: items.length
+      });
 
       if (!items.length) {
         return res.status(200).json({
@@ -1268,6 +1319,12 @@ export default async function handler(req, res) {
       regexSearchIntent.limit = null;
     }
 
+    debugLog("intent.parsed", {
+      userExplicitLimit,
+      aiSearchIntent,
+      regexSearchIntent
+    });
+
     const toolMessages = [
       { role: "system", content: TOOL_CALL_SYSTEM_PROMPT },
       ...incomingMessages
@@ -1286,6 +1343,7 @@ export default async function handler(req, res) {
     let finalReply = "";
 
     for (let loopIndex = 0; loopIndex < TOOL_LOOP_LIMIT; loopIndex += 1) {
+      debugLog("tool.loop.iteration", { loopIndex: loopIndex + 1, limit: TOOL_LOOP_LIMIT });
       const toolPlanData = await callDeepSeekChat({
         model: DEEPSEEK_MODEL,
         messages: toolMessages,
@@ -1306,6 +1364,11 @@ export default async function handler(req, res) {
       toolMessages.push(assistantMessage);
 
       const toolCalls = Array.isArray(assistantMessage.tool_calls) ? assistantMessage.tool_calls : [];
+      debugLog("tool.loop.model", {
+        hasToolCalls: toolCalls.length > 0,
+        toolCallCount: toolCalls.length,
+        contentLength: typeof assistantMessage.content === "string" ? assistantMessage.content.length : 0
+      });
       if (!toolCalls.length) {
         finalReply = typeof assistantMessage.content === "string" ? assistantMessage.content : "";
         break;
