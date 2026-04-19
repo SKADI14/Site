@@ -131,6 +131,7 @@ function cleanupSearchKeyword(keyword) {
     .replace(/^(?:来|找|搜|搜索|给我|帮我|请|想看|想要)/u, "")
     .replace(/^(?:一些|一点|几个|几本|点|下|一下)/u, "")
     .replace(/(?:的)?本子$/u, "")
+    .replace(/的$/u, "")
     .trim();
 }
 
@@ -451,12 +452,14 @@ async function executeToolCall(toolCall, req, uiPayload) {
       || cleanupSearchKeyword(regexIntent.keyword)
       || cleanupSearchKeyword(keywordFromArgs)
       || "原神";
-    const limit = clampInteger(
-      aiIntent.limit != null ? aiIntent.limit : (regexIntent.limit != null ? regexIntent.limit : args.limit),
-      1,
-      20,
-      10
-    );
+    const limitRaw = uiPayload.userExplicitLimit != null
+      ? (aiIntent.limit != null
+        ? aiIntent.limit
+        : (regexIntent.limit != null
+          ? regexIntent.limit
+          : args.limit))
+      : 10;
+    const limit = clampInteger(limitRaw, 1, 20, 10);
     const result = await searchJmAlbumsWindow(keyword, 0, limit);
     const items = result.items;
 
@@ -1255,6 +1258,15 @@ export default async function handler(req, res) {
 
     const aiSearchIntent = await parseSearchIntentByAI(lastUserMessage);
     const regexSearchIntent = parseSearchIntentByRegex(lastUserMessage);
+    const parsedSearchIntentFromText = parseSearchIntentFromText(lastUserMessage);
+    const userExplicitLimit = Number.isFinite(parsedSearchIntentFromText.limit)
+      ? Number(parsedSearchIntentFromText.limit)
+      : null;
+
+    if (userExplicitLimit == null) {
+      aiSearchIntent.limit = null;
+      regexSearchIntent.limit = null;
+    }
 
     const toolMessages = [
       { role: "system", content: TOOL_CALL_SYSTEM_PROMPT },
@@ -1267,7 +1279,8 @@ export default async function handler(req, res) {
       replyOverride: "",
       lastUserMessage,
       aiSearchIntent,
-      regexSearchIntent
+      regexSearchIntent,
+      userExplicitLimit
     };
 
     let finalReply = "";
