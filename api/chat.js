@@ -162,6 +162,75 @@ function parseSearchIntentByRegex(text) {
   };
 }
 
+function parseContinuationIntent(text) {
+  const source = normalizeText(text);
+  if (!source) {
+    return {
+      isContinue: false,
+      limit: null
+    };
+  }
+
+  const countMatch = source.match(/再来\s*(\d{1,2})\s*条/u);
+  if (countMatch && countMatch[1]) {
+    return {
+      isContinue: true,
+      limit: Number(countMatch[1])
+    };
+  }
+
+  if (/再来\s*(?:一些|一点|点)?/u.test(source)) {
+    return {
+      isContinue: true,
+      limit: null
+    };
+  }
+
+  return {
+    isContinue: false,
+    limit: null
+  };
+}
+
+function deriveSearchHistoryContext(messages) {
+  let hasSearch = false;
+  let keyword = "";
+  let pageSize = 5;
+  let shownCount = 0;
+
+  const list = Array.isArray(messages) ? messages : [];
+  for (const message of list) {
+    if (!message || message.role !== "user" || typeof message.content !== "string") {
+      continue;
+    }
+
+    const content = message.content;
+    const explicitSearch = parseSearchIntentByRegex(content);
+    if (explicitSearch.isSearch && explicitSearch.keyword) {
+      const nextPageSize = clampInteger(explicitSearch.limit, 1, 10, 5);
+      hasSearch = true;
+      keyword = explicitSearch.keyword;
+      pageSize = nextPageSize;
+      shownCount = nextPageSize;
+      continue;
+    }
+
+    const continuation = parseContinuationIntent(content);
+    if (continuation.isContinue && hasSearch) {
+      const nextPageSize = clampInteger(continuation.limit, 1, 10, pageSize);
+      shownCount += nextPageSize;
+      pageSize = nextPageSize;
+    }
+  }
+
+  return {
+    hasSearch,
+    keyword,
+    pageSize,
+    shownCount
+  };
+}
+
 const SEARCH_INTENT_SYSTEM_PROMPT = [
   "你是搜索意图解析器。",
   "只输出 JSON。",
@@ -1099,6 +1168,41 @@ export default async function handler(req, res) {
       ? req.body.messages
       : [];
     const lastUserMessage = getLastUserMessage(incomingMessages);
+    const historyMessages = incomingMessages.slice(0, Math.max(0, incomingMessages.length - 1));
+    const continuationIntent = parseContinuationIntent(lastUserMessage);
+    const historySearchContext = deriveSearchHistoryContext(historyMessages);
+
+    if (continuationIntent.isContinue) {
+      if (!historySearchContext.hasSearch || !historySearchContext.keyword) {
+        return res.status(200).json({
+          reply: "还没有可继续的搜索记录。你可以先说“帮我找本子，关键词为xxx”。"
+        });
+      }
+
+      const limit = clampInteger(continuationIntent.limit, 1, 10, historySearchContext.pageSize || 5);
+      const offset = Math.max(0, historySearchContext.shownCount || 0);
+      const keyword = historySearchContext.keyword;
+      const result = await searchJmAlbums(keyword);
+      const items = result.items.slice(offset, offset + limit);
+
+      if (!items.length) {
+        return res.status(200).json({
+          reply: `“${keyword}”的结果已经展示完当前可见列表了。你可以换个关键词再搜一次。`
+        });
+      }
+
+      const lines = [`继续为你展示“${keyword}”相关结果（共 ${result.total} 条，本次展示 ${items.length} 条）：`];
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        lines.push(`${offset + i + 1}. [${item.id}] ${item.title} - ${item.author}`);
+      }
+      lines.push("你可以继续说：再来10条 / 再来一些 / 帮我下载<编号>的本子");
+
+      return res.status(200).json({
+        reply: lines.join("\n")
+      });
+    }
+
     const aiSearchIntent = await parseSearchIntentByAI(lastUserMessage);
     const regexSearchIntent = parseSearchIntentByRegex(lastUserMessage);
 
