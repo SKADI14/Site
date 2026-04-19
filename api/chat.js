@@ -121,6 +121,108 @@ function parseSearchIntentFromText(text) {
   };
 }
 
+function cleanupSearchKeyword(keyword) {
+  const source = normalizeText(keyword);
+  if (!source) {
+    return "";
+  }
+
+  return source
+    .replace(/^(?:来|找|搜|搜索|给我|帮我|请|想看|想要)/u, "")
+    .replace(/^(?:一些|一点|几个|几本|点|下|一下)/u, "")
+    .replace(/(?:的)?本子$/u, "")
+    .trim();
+}
+
+function parseSearchIntentByRegex(text) {
+  const source = normalizeText(text);
+  if (!source) {
+    return {
+      isSearch: false,
+      keyword: "",
+      limit: null
+    };
+  }
+
+  const base = parseSearchIntentFromText(source);
+  let keyword = cleanupSearchKeyword(base.keyword);
+
+  if (!keyword) {
+    const match = source.match(/(?:来|找|搜|搜索)\s*(?:一些|一点|几个|几本)?\s*([^，。；;\n]+?)\s*(?:的)?本子/u);
+    if (match && match[1]) {
+      keyword = cleanupSearchKeyword(match[1]);
+    }
+  }
+
+  const limit = Number.isFinite(base.limit) ? base.limit : null;
+  return {
+    isSearch: Boolean(keyword),
+    keyword,
+    limit
+  };
+}
+
+const SEARCH_INTENT_SYSTEM_PROMPT = [
+  "你是搜索意图解析器。",
+  "只输出 JSON。",
+  "任务：从用户句子中识别是否要搜索本子，并提取关键词与数量。",
+  "规则：",
+  "1. 当句子包含找/搜/搜索/来一些/来点 + xxx + 本子时，isSearch=true。",
+  "2. keyword 只保留作品关键词，不要带数量词或语气词，例如‘一些终末地’应提取为‘终末地’。",
+  "3. 若未明确数量，limit=null。",
+  "4. 输出 schema: {\"isSearch\": boolean, \"keyword\": string, \"limit\": number|null}"
+].join("\n");
+
+async function parseSearchIntentByAI(text) {
+  const source = normalizeText(text);
+  if (!source) {
+    return {
+      isSearch: false,
+      keyword: "",
+      limit: null
+    };
+  }
+
+  try {
+    const data = await callDeepSeekChat({
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: "system", content: SEARCH_INTENT_SYSTEM_PROMPT },
+        { role: "user", content: `json\n用户原文：${source}` }
+      ],
+      response_format: {
+        type: "json_object"
+      },
+      max_tokens: 256
+    });
+
+    const content = data
+      && data.choices
+      && data.choices[0]
+      && data.choices[0].message
+      && typeof data.choices[0].message.content === "string"
+      ? data.choices[0].message.content
+      : "";
+
+    const parsed = safeJsonParse(content) || {};
+    const keyword = cleanupSearchKeyword(parsed.keyword || "");
+    const rawLimit = parsed.limit;
+    const limit = Number.isFinite(Number(rawLimit)) ? Number(rawLimit) : null;
+
+    return {
+      isSearch: Boolean(parsed.isSearch) || Boolean(keyword),
+      keyword,
+      limit
+    };
+  } catch (err) {
+    return {
+      isSearch: false,
+      keyword: "",
+      limit: null
+    };
+  }
+}
+
 const DEEPSEEK_API_BASE = process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com";
 const DEEPSEEK_BETA_API_BASE = process.env.DEEPSEEK_BETA_API_BASE || "https://api.deepseek.com/beta";
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
@@ -273,10 +375,19 @@ async function executeToolCall(toolCall, req, uiPayload) {
   const args = safeJsonParse(argsText) || {};
 
   if (toolName === "search_jm_albums") {
-    const userIntent = parseSearchIntentFromText(uiPayload.lastUserMessage || "");
+    const aiIntent = uiPayload.aiSearchIntent || { isSearch: false, keyword: "", limit: null };
+    const regexIntent = uiPayload.regexSearchIntent || { isSearch: false, keyword: "", limit: null };
     const keywordFromArgs = normalizeText(args.keyword);
-    const keyword = userIntent.keyword || keywordFromArgs || "原神";
-    const limit = clampInteger(userIntent.limit != null ? userIntent.limit : args.limit, 1, 10, 5);
+    const keyword = cleanupSearchKeyword(aiIntent.keyword)
+      || cleanupSearchKeyword(regexIntent.keyword)
+      || cleanupSearchKeyword(keywordFromArgs)
+      || "原神";
+    const limit = clampInteger(
+      aiIntent.limit != null ? aiIntent.limit : (regexIntent.limit != null ? regexIntent.limit : args.limit),
+      1,
+      10,
+      5
+    );
     const result = await searchJmAlbums(keyword);
     const items = result.items.slice(0, limit);
 
@@ -987,6 +1098,9 @@ export default async function handler(req, res) {
     const incomingMessages = Array.isArray(req.body && req.body.messages)
       ? req.body.messages
       : [];
+    const lastUserMessage = getLastUserMessage(incomingMessages);
+    const aiSearchIntent = await parseSearchIntentByAI(lastUserMessage);
+    const regexSearchIntent = parseSearchIntentByRegex(lastUserMessage);
 
     const toolMessages = [
       { role: "system", content: TOOL_CALL_SYSTEM_PROMPT },
@@ -997,7 +1111,9 @@ export default async function handler(req, res) {
       downloadUrl: null,
       jmDownload: null,
       replyOverride: "",
-      lastUserMessage: getLastUserMessage(incomingMessages)
+      lastUserMessage,
+      aiSearchIntent,
+      regexSearchIntent
     };
 
     let finalReply = "";
