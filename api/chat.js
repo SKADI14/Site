@@ -457,8 +457,8 @@ async function executeToolCall(toolCall, req, uiPayload) {
       10,
       5
     );
-    const result = await searchJmAlbums(keyword);
-    const items = result.items.slice(0, limit);
+    const result = await searchJmAlbumsWindow(keyword, 0, limit);
+    const items = result.items;
 
     if (!items.length) {
       uiPayload.replyOverride = `没有搜到“${keyword}”相关本子。你可以换一个关键词试试。`;
@@ -701,15 +701,65 @@ function toAlbumSummary(item) {
   return { id, title, author };
 }
 
-async function searchJmAlbums(keyword) {
+async function searchJmAlbums(keyword, page = 1) {
   const safeKeyword = encodeURIComponent(keyword).replace(/%20/g, "+");
-  const route = `/search?search_query=${safeKeyword}&o=mr&page=1`;
+  const safePage = Math.max(1, Number(page) || 1);
+  const route = `/search?search_query=${safeKeyword}&o=mr&page=${safePage}`;
   const { data, domain } = await callJmApiWithFallback(route);
   const content = Array.isArray(data.content) ? data.content : [];
   return {
     domain,
     total: Number(data.total || 0),
     items: content.map(toAlbumSummary).filter(Boolean)
+  };
+}
+
+async function searchJmAlbumsWindow(keyword, offset, limit) {
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const safeLimit = Math.max(1, Number(limit) || 1);
+
+  const firstPage = await searchJmAlbums(keyword, 1);
+  const total = Number(firstPage.total || 0);
+  const pageSize = Math.max(1, firstPage.items.length || safeLimit);
+
+  if (safeOffset >= total) {
+    return {
+      total,
+      items: []
+    };
+  }
+
+  const startPage = Math.floor(safeOffset / pageSize) + 1;
+  const startIndex = safeOffset % pageSize;
+  const merged = [];
+  let currentPage = startPage;
+
+  while (merged.length < safeLimit) {
+    const pageData = currentPage === 1 ? firstPage : await searchJmAlbums(keyword, currentPage);
+    const pageItems = Array.isArray(pageData.items) ? pageData.items : [];
+    if (!pageItems.length) {
+      break;
+    }
+
+    const begin = currentPage === startPage ? startIndex : 0;
+    if (begin < pageItems.length) {
+      const needed = safeLimit - merged.length;
+      merged.push(...pageItems.slice(begin, begin + needed));
+    }
+
+    if (pageItems.length < pageSize) {
+      break;
+    }
+
+    currentPage += 1;
+    if (currentPage > 100) {
+      break;
+    }
+  }
+
+  return {
+    total,
+    items: merged
   };
 }
 
@@ -1182,8 +1232,8 @@ export default async function handler(req, res) {
       const limit = clampInteger(continuationIntent.limit, 1, 10, historySearchContext.pageSize || 5);
       const offset = Math.max(0, historySearchContext.shownCount || 0);
       const keyword = historySearchContext.keyword;
-      const result = await searchJmAlbums(keyword);
-      const items = result.items.slice(offset, offset + limit);
+      const result = await searchJmAlbumsWindow(keyword, offset, limit);
+      const items = result.items;
 
       if (!items.length) {
         return res.status(200).json({
