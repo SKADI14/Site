@@ -128,7 +128,7 @@ function cleanupSearchKeyword(keyword) {
   }
 
   return source
-    .replace(/^(?:来|找|搜|搜索|给我|帮我|请|想看|想要)/u, "")
+    .replace(/^(?:来|找|搜索|搜|给我|帮我|请|想看|想要)/u, "")
     .replace(/^(?:一些|一点|几个|几本|点|下|一下)/u, "")
     .replace(/(?:的)?本子$/u, "")
     .replace(/的$/u, "")
@@ -149,7 +149,7 @@ function parseSearchIntentByRegex(text) {
   let keyword = cleanupSearchKeyword(base.keyword);
 
   if (!keyword) {
-    const match = source.match(/(?:来|找|搜|搜索)\s*(?:一些|一点|几个|几本)?\s*([^，。；;\n]+?)\s*(?:的)?本子/u);
+    const match = source.match(/(?:来|找|搜索|搜)\s*(?:一些|一点|几个|几本)?\s*([^，。；;\n]+?)\s*(?:的)?本子/u);
     if (match && match[1]) {
       keyword = cleanupSearchKeyword(match[1]);
     }
