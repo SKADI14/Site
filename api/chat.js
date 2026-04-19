@@ -74,6 +74,53 @@ function normalizeText(text) {
   return typeof text === "string" ? text.trim() : "";
 }
 
+function getLastUserMessage(messages) {
+  if (!Array.isArray(messages)) {
+    return "";
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message && message.role === "user" && typeof message.content === "string") {
+      return message.content;
+    }
+  }
+
+  return "";
+}
+
+function parseSearchIntentFromText(text) {
+  const source = normalizeText(text);
+  if (!source) {
+    return { keyword: "", limit: null };
+  }
+
+  const keywordPatterns = [
+    /关键词\s*(?:为|是|:|：)\s*([^，。；;\n]+)/u,
+    /搜索\s*([^，。；;\n]+?)\s*(?:本子|结果)?$/u,
+    /找\s*([^，。；;\n]+?)\s*本子/u
+  ];
+
+  let keyword = "";
+  for (const pattern of keywordPatterns) {
+    const match = source.match(pattern);
+    if (match && match[1]) {
+      keyword = normalizeText(match[1]);
+      if (keyword) {
+        break;
+      }
+    }
+  }
+
+  const limitMatch = source.match(/(?:展示|显示|返回|给我|要)\s*(\d{1,2})\s*条/u);
+  const limit = limitMatch && limitMatch[1] ? Number(limitMatch[1]) : null;
+
+  return {
+    keyword,
+    limit: Number.isFinite(limit) ? limit : null
+  };
+}
+
 const DEEPSEEK_API_BASE = process.env.DEEPSEEK_API_BASE || "https://api.deepseek.com";
 const DEEPSEEK_BETA_API_BASE = process.env.DEEPSEEK_BETA_API_BASE || "https://api.deepseek.com/beta";
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
@@ -226,14 +273,29 @@ async function executeToolCall(toolCall, req, uiPayload) {
   const args = safeJsonParse(argsText) || {};
 
   if (toolName === "search_jm_albums") {
-    const keyword = normalizeText(args.keyword) || "原神";
-
-    const limit = clampInteger(args.limit, 1, 10, 5);
+    const userIntent = parseSearchIntentFromText(uiPayload.lastUserMessage || "");
+    const keywordFromArgs = normalizeText(args.keyword);
+    const keyword = userIntent.keyword || keywordFromArgs || "原神";
+    const limit = clampInteger(userIntent.limit != null ? userIntent.limit : args.limit, 1, 10, 5);
     const result = await searchJmAlbums(keyword);
+    const items = result.items.slice(0, limit);
+
+    if (!items.length) {
+      uiPayload.replyOverride = `没有搜到“${keyword}”相关本子。你可以换一个关键词试试。`;
+    } else {
+      const lines = [`帮你搜到了“${keyword}”相关结果（共 ${result.total} 条，展示 ${items.length} 条）：`];
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        lines.push(`${i + 1}. [${item.id}] ${item.title} - ${item.author}`);
+      }
+      lines.push("你可以继续说：帮我下载<编号>的本子");
+      uiPayload.replyOverride = lines.join("\n");
+    }
+
     return {
       keyword,
       total: result.total,
-      items: result.items.slice(0, limit)
+      items
     };
   }
 
@@ -933,7 +995,9 @@ export default async function handler(req, res) {
 
     const uiPayload = {
       downloadUrl: null,
-      jmDownload: null
+      jmDownload: null,
+      replyOverride: "",
+      lastUserMessage: getLastUserMessage(incomingMessages)
     };
 
     let finalReply = "";
@@ -986,11 +1050,13 @@ export default async function handler(req, res) {
       finalReply = "处理完成，但暂时没有可展示的文本结果。";
     }
 
-    let normalizedReply = finalReply;
-    try {
-      normalizedReply = await normalizeReplyByJsonMode(toolMessages, finalReply);
-    } catch (err) {
-      normalizedReply = finalReply;
+    let normalizedReply = uiPayload.replyOverride || finalReply;
+    if (!uiPayload.replyOverride) {
+      try {
+        normalizedReply = await normalizeReplyByJsonMode(toolMessages, finalReply);
+      } catch (err) {
+        normalizedReply = finalReply;
+      }
     }
 
     const responseBody = {
