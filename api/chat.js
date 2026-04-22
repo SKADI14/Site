@@ -74,6 +74,82 @@ function normalizeText(text) {
   return typeof text === "string" ? text.trim() : "";
 }
 
+function normalizeDigits(text) {
+  const source = normalizeText(text);
+  if (!source) {
+    return "";
+  }
+
+  return source.replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 65248));
+}
+
+function parseChineseNumberToken(token) {
+  const source = normalizeText(token);
+  if (!source) {
+    return null;
+  }
+
+  const digitMap = {
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9
+  };
+
+  if (source === "十") {
+    return 10;
+  }
+
+  const leadingTen = source.match(/^十([一二两三四五六七八九])$/u);
+  if (leadingTen) {
+    return 10 + digitMap[leadingTen[1]];
+  }
+
+  const endingTen = source.match(/^([一二两三四五六七八九])十$/u);
+  if (endingTen) {
+    return digitMap[endingTen[1]] * 10;
+  }
+
+  const tensWithUnits = source.match(/^([一二两三四五六七八九])十([一二两三四五六七八九])$/u);
+  if (tensWithUnits) {
+    return digitMap[tensWithUnits[1]] * 10 + digitMap[tensWithUnits[2]];
+  }
+
+  if (Object.prototype.hasOwnProperty.call(digitMap, source)) {
+    return digitMap[source];
+  }
+
+  return null;
+}
+
+function parseLimitValue(raw) {
+  if (raw == null) {
+    return null;
+  }
+
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.floor(raw);
+  }
+
+  const source = normalizeDigits(String(raw));
+  if (!source) {
+    return null;
+  }
+
+  if (/^\d{1,3}$/u.test(source)) {
+    return Number(source);
+  }
+
+  return parseChineseNumberToken(source);
+}
+
 function getLastUserMessage(messages) {
   if (!Array.isArray(messages)) {
     return "";
@@ -112,8 +188,8 @@ function parseSearchIntentFromText(text) {
     }
   }
 
-  const limitMatch = source.match(/(?:展示|显示|返回|给我|要)\s*(\d{1,2})\s*条/u);
-  const limit = limitMatch && limitMatch[1] ? Number(limitMatch[1]) : null;
+  const limitMatch = source.match(/(?:展示|显示|返回|给我|要)\s*([\d０-９]{1,3}|[零一二两三四五六七八九十]{1,3})\s*条/u);
+  const limit = limitMatch && limitMatch[1] ? parseLimitValue(limitMatch[1]) : null;
 
   return {
     keyword,
@@ -172,11 +248,11 @@ function parseContinuationIntent(text) {
     };
   }
 
-  const countMatch = source.match(/再来\s*(\d{1,2})\s*条/u);
+  const countMatch = source.match(/再来\s*([\d０-９]{1,3}|[零一二两三四五六七八九十]{1,3})\s*条/u);
   if (countMatch && countMatch[1]) {
     return {
       isContinue: true,
-      limit: Number(countMatch[1])
+      limit: parseLimitValue(countMatch[1])
     };
   }
 
@@ -277,7 +353,7 @@ async function parseSearchIntentByAI(text) {
     const parsed = safeJsonParse(content) || {};
     const keyword = cleanupSearchKeyword(parsed.keyword || "");
     const rawLimit = parsed.limit;
-    const limit = Number.isFinite(Number(rawLimit)) ? Number(rawLimit) : null;
+    const limit = parseLimitValue(rawLimit);
 
     return {
       isSearch: Boolean(parsed.isSearch) || Boolean(keyword),
@@ -399,7 +475,7 @@ const TOOL_CALL_SYSTEM_PROMPT = [
   "你是网站内置智能助手，可调用工具完成搜索和下载准备。",
   "规则：",
   "1. 当用户表达搜本子、找作品、下载车号、原神下载等意图时，优先调用对应工具，不要臆造结果。",
-  "2. 若用户明确给出关键词、车号或数量（如展示10条），调用工具时必须原样使用这些参数，不能改写成默认值。",
+  "2. 若用户明确给出关键词、车号或数量（如展示10条、展示十条），调用工具时必须原样使用这些参数，不能改写成默认值。",
   "2.1 搜索本子时若用户未明确给数量，调用 search_jm_albums 默认使用 limit=10。",
   "3. 工具结果会以 tool 消息返回，你要基于工具结果给出中文答复。",
   "4. 若信息不足，先用自然语言追问，不要盲目调用工具。",
