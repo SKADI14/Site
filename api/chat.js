@@ -155,7 +155,7 @@ function parseSearchIntentByRegex(text) {
     }
   }
 
-  const limit = Number.isFinite(base.limit) ? base.limit : null;
+  const limit = Number.isFinite(base.limit) ? base.limit : (keyword ? 10 : null);
   return {
     isSearch: Boolean(keyword),
     keyword,
@@ -400,6 +400,7 @@ const TOOL_CALL_SYSTEM_PROMPT = [
   "规则：",
   "1. 当用户表达搜本子、找作品、下载车号、原神下载等意图时，优先调用对应工具，不要臆造结果。",
   "2. 若用户明确给出关键词、车号或数量（如展示10条），调用工具时必须原样使用这些参数，不能改写成默认值。",
+  "2.1 搜索本子时若用户未明确给数量，调用 search_jm_albums 默认使用 limit=10。",
   "3. 工具结果会以 tool 消息返回，你要基于工具结果给出中文答复。",
   "4. 若信息不足，先用自然语言追问，不要盲目调用工具。",
   "5. 如果工具执行失败，要给出简短可操作的建议。"
@@ -1326,8 +1327,8 @@ export default async function handler(req, res) {
       : null;
 
     if (userExplicitLimit == null) {
-      aiSearchIntent.limit = null;
-      regexSearchIntent.limit = null;
+      aiSearchIntent.limit = 10;
+      regexSearchIntent.limit = 10;
     }
 
     debugLog("intent.parsed", {
