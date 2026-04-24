@@ -1344,6 +1344,9 @@ export default async function handler(req, res) {
     const incomingMessages = Array.isArray(req.body && req.body.messages)
       ? req.body.messages
       : [];
+    const agentEnabled = req.body && typeof req.body.agentEnabled === "boolean"
+      ? req.body.agentEnabled
+      : true;
     const lastUserMessage = getLastUserMessage(incomingMessages);
     const historyMessages = incomingMessages.slice(0, Math.max(0, incomingMessages.length - 1));
     const continuationIntent = parseContinuationIntent(lastUserMessage);
@@ -1351,10 +1354,30 @@ export default async function handler(req, res) {
 
     debugLog("request.begin", {
       messageCount: incomingMessages.length,
+      agentEnabled,
       lastUserMessage,
       continuationIntent,
       historySearchContext
     });
+
+    if (!agentEnabled) {
+      const plainData = await callDeepSeekChat({
+        model: DEEPSEEK_MODEL,
+        messages: incomingMessages
+      });
+
+      const plainMessage = plainData
+        && plainData.choices
+        && plainData.choices[0]
+        && plainData.choices[0].message
+        && typeof plainData.choices[0].message.content === "string"
+        ? plainData.choices[0].message.content
+        : "";
+
+      return res.status(200).json({
+        reply: plainMessage || "处理完成，但暂时没有可展示的文本结果。"
+      });
+    }
 
     if (continuationIntent.isContinue) {
       if (!historySearchContext.hasSearch || !historySearchContext.keyword) {
