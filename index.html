@@ -1194,11 +1194,11 @@
             const cachedTokens = Number(usage.cachedTokens || 0);
             const parts = [];
 
-            const inputText = "输入 " + formatTokenCount(inputTokens) + " tokens" + (cachedTokens > 0 ? "（" + formatTokenCount(cachedTokens) + " cached）" : "");
+            const inputText = "↑ " + formatTokenCount(inputTokens) + " tokens" + (cachedTokens > 0 ? " (" + formatTokenCount(cachedTokens) + " cached)" : "");
             parts.push(inputText);
-            parts.push("输出 " + formatTokenCount(outputTokens) + " tokens");
-            parts.push((Number.isFinite(speed) && speed > 0 ? speed.toFixed(1) : "0.0") + " tok/s");
-            parts.push(formatDurationSeconds(elapsedMs));
+            parts.push("↓ " + formatTokenCount(outputTokens) + " tokens");
+            parts.push("⚡ " + (Number.isFinite(speed) && speed > 0 ? speed.toFixed(1) : "0.0") + " tok/s");
+            parts.push("⏱ " + formatDurationSeconds(elapsedMs));
 
             return parts.join(" · ");
         }
