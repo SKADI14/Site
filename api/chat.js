@@ -340,6 +340,8 @@ async function parseSearchIntentByAI(text) {
         type: "json_object"
       },
       max_tokens: 256
+    }, {
+      thinkingEnabled: true
     });
 
     const content = data
@@ -512,8 +514,19 @@ function clampInteger(value, minValue, maxValue, defaultValue) {
 
 async function callDeepSeekChat(payload, options = {}) {
   const useBeta = options.useBeta === true;
+  const hasThinkingFlag = typeof options.thinkingEnabled === "boolean";
+  const thinkingType = options.thinkingEnabled ? "enabled" : "disabled";
   const baseUrl = useBeta ? DEEPSEEK_BETA_API_BASE : DEEPSEEK_API_BASE;
   const endpoint = `${baseUrl.replace(/\/+$/u, "")}/chat/completions`;
+  const requestPayload = hasThinkingFlag
+    ? {
+      ...payload,
+      extra_body: {
+        ...(payload && payload.extra_body ? payload.extra_body : {}),
+        thinking: { type: thinkingType }
+      }
+    }
+    : payload;
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -521,7 +534,7 @@ async function callDeepSeekChat(payload, options = {}) {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(requestPayload)
   });
 
   const data = await response.json();
@@ -662,6 +675,8 @@ async function normalizeReplyByJsonMode(messages, fallbackReply) {
       type: "json_object"
     },
     max_tokens: 512
+  }, {
+    thinkingEnabled: true
   });
 
   const content = data
@@ -1364,6 +1379,8 @@ export default async function handler(req, res) {
       const plainData = await callDeepSeekChat({
         model: DEEPSEEK_MODEL,
         messages: incomingMessages
+      }, {
+        thinkingEnabled: false
       });
 
       const plainMessage = plainData
@@ -1459,7 +1476,10 @@ export default async function handler(req, res) {
         model: DEEPSEEK_MODEL,
         messages: toolMessages,
         tools: DEEPSEEK_TOOLS
-      }, { useBeta: true });
+      }, {
+        useBeta: true,
+        thinkingEnabled: true
+      });
 
       const assistantMessage = toolPlanData
         && toolPlanData.choices
