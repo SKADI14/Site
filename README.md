@@ -45,6 +45,7 @@ Site/
 
 - 优化prompt
 - 思考模式/pro model
+- token 显示
 - 接入jm（简单agent（完成大部分），部分依赖正则）
 - 新建会话按钮
 - 聊天记录保存
