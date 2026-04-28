@@ -205,6 +205,23 @@
             background: var(--user);
         }
 
+        .message-meta {
+            margin-top: 4px;
+            font-size: 11px;
+            line-height: 1.4;
+            color: #9ca3af;
+            white-space: normal;
+            word-break: break-word;
+        }
+
+        .message-meta.user {
+            text-align: right;
+        }
+
+        .message-meta.assistant {
+            text-align: left;
+        }
+
         .composer-shell {
             position: fixed;
             left: 0;
@@ -1142,7 +1159,51 @@
             }
         }
 
-        function addMessage(role, text) {
+        function formatTokenCount(value) {
+            const number = Number(value);
+            if (!Number.isFinite(number) || number <= 0) {
+                return "0";
+            }
+
+            if (number >= 1000) {
+                const compact = (number / 1000).toFixed(number >= 10000 ? 1 : 1);
+                return compact.replace(/\.0$/u, "") + "K";
+            }
+
+            return String(Math.round(number));
+        }
+
+        function formatDurationSeconds(ms) {
+            const seconds = Math.max(0, Number(ms) || 0) / 1000;
+            if (seconds >= 10) {
+                return seconds.toFixed(1).replace(/\.0$/u, "") + "s";
+            }
+
+            return seconds.toFixed(1) + "s";
+        }
+
+        function formatUsageMeta(usage) {
+            if (!usage) {
+                return "";
+            }
+
+            const inputTokens = Number(usage.promptTokens || 0);
+            const outputTokens = Number(usage.completionTokens || 0);
+            const elapsedMs = Number(usage.elapsedMs || 0);
+            const speed = Number(usage.speed || 0);
+            const cachedTokens = Number(usage.cachedTokens || 0);
+            const parts = [];
+
+            const inputText = "输入 " + formatTokenCount(inputTokens) + " tokens" + (cachedTokens > 0 ? "（" + formatTokenCount(cachedTokens) + " cached）" : "");
+            parts.push(inputText);
+            parts.push("输出 " + formatTokenCount(outputTokens) + " tokens");
+            parts.push((Number.isFinite(speed) && speed > 0 ? speed.toFixed(1) : "0.0") + " tok/s");
+            parts.push(formatDurationSeconds(elapsedMs));
+
+            return parts.join(" · ");
+        }
+
+        function addMessage(role, text, metaText) {
             if (emptyStateEl) {
                 emptyStateEl.style.display = "none";
             }
@@ -1150,11 +1211,27 @@
             const row = document.createElement("div");
             row.className = "message-row";
 
-            const safeText = escapeHtml(text);
-            row.innerHTML =
-                '<div class="message-wrap ' + role + '">' +
-                '<div class="bubble ' + role + '">' + safeText + '</div>' +
-                "</div>";
+            const wrap = document.createElement("div");
+            wrap.className = "message-wrap " + role;
+
+            const bubbleContainer = document.createElement("div");
+
+            const bubble = document.createElement("div");
+            bubble.className = "bubble " + role;
+            bubble.innerHTML = escapeHtml(text);
+
+            bubbleContainer.appendChild(bubble);
+
+            const usageText = metaText ? String(metaText).trim() : "";
+            if (usageText) {
+                const meta = document.createElement("div");
+                meta.className = "message-meta " + role;
+                meta.textContent = usageText;
+                bubbleContainer.appendChild(meta);
+            }
+
+            wrap.appendChild(bubbleContainer);
+            row.appendChild(wrap);
 
             chatEl.appendChild(row);
             scrollToBottom();
@@ -1193,6 +1270,7 @@
             scrollToBottom();
 
             try {
+                const requestStartedAt = Date.now();
                 const res = await fetch(API_URL, {
                     method: "POST",
                     headers: {
@@ -1213,7 +1291,10 @@
                 }
 
                 const reply = data.reply || "没有返回内容";
-                addMessage("assistant", reply);
+                const usageMeta = formatUsageMeta(data.usage || {
+                    elapsedMs: Date.now() - requestStartedAt
+                });
+                addMessage("assistant", reply, usageMeta);
                 messages.push({ role: "assistant", content: reply });
 
                 if (data.jmDownload) {

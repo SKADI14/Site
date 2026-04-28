@@ -319,7 +319,7 @@ const SEARCH_INTENT_SYSTEM_PROMPT = [
   "4. 输出 schema: {\"isSearch\": boolean, \"keyword\": string, \"limit\": number|null}"
 ].join("\n");
 
-async function parseSearchIntentByAI(text) {
+async function parseSearchIntentByAI(text, usageCollector = null) {
   const source = normalizeText(text);
   if (!source) {
     return {
@@ -343,6 +343,10 @@ async function parseSearchIntentByAI(text) {
     }, {
       thinkingEnabled: true
     });
+
+    if (usageCollector) {
+      usageCollector.current = mergeUsageSummary(usageCollector.current, getUsageSummaryFromResponse(data));
+    }
 
     const content = data
       && data.choices
@@ -548,6 +552,65 @@ async function callDeepSeekChat(payload, options = {}) {
   return data;
 }
 
+function getUsageSummaryFromResponse(data) {
+  const usage = data && typeof data === "object" ? data.usage : null;
+  if (!usage || typeof usage !== "object") {
+    return null;
+  }
+
+  const promptTokens = Number(usage.prompt_tokens || 0);
+  const completionTokens = Number(usage.completion_tokens || 0);
+  const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens);
+  const cachedTokens = Number(
+    (usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens) ||
+    usage.cached_tokens ||
+    0
+  );
+
+  return {
+    promptTokens: Number.isFinite(promptTokens) ? promptTokens : 0,
+    completionTokens: Number.isFinite(completionTokens) ? completionTokens : 0,
+    totalTokens: Number.isFinite(totalTokens) ? totalTokens : 0,
+    cachedTokens: Number.isFinite(cachedTokens) ? cachedTokens : 0
+  };
+}
+
+function mergeUsageSummary(target, next) {
+  if (!next) {
+    return target;
+  }
+
+  if (!target) {
+    return { ...next };
+  }
+
+  return {
+    promptTokens: (target.promptTokens || 0) + (next.promptTokens || 0),
+    completionTokens: (target.completionTokens || 0) + (next.completionTokens || 0),
+    totalTokens: (target.totalTokens || 0) + (next.totalTokens || 0),
+    cachedTokens: (target.cachedTokens || 0) + (next.cachedTokens || 0)
+  };
+}
+
+function createResponseUsageSummary(usageSummary, elapsedMs) {
+  if (!usageSummary && !Number.isFinite(elapsedMs)) {
+    return null;
+  }
+
+  const totalMs = Number.isFinite(elapsedMs) ? Math.max(0, Math.round(elapsedMs)) : 0;
+  const outputTokens = Math.max(0, Number(usageSummary && usageSummary.completionTokens ? usageSummary.completionTokens : 0));
+  const speed = totalMs > 0 ? (outputTokens * 1000) / totalMs : 0;
+
+  return {
+    promptTokens: Math.max(0, Number(usageSummary && usageSummary.promptTokens ? usageSummary.promptTokens : 0)),
+    completionTokens: outputTokens,
+    totalTokens: Math.max(0, Number(usageSummary && usageSummary.totalTokens ? usageSummary.totalTokens : 0)),
+    cachedTokens: Math.max(0, Number(usageSummary && usageSummary.cachedTokens ? usageSummary.cachedTokens : 0)),
+    elapsedMs: totalMs,
+    speed
+  };
+}
+
 function resolveGenshinPlatform(platform, req) {
   if (platform === "mobile" || platform === "pc") {
     return platform;
@@ -657,7 +720,7 @@ async function executeToolCall(toolCall, req, uiPayload) {
   return { error: `未知工具: ${toolName}` };
 }
 
-async function normalizeReplyByJsonMode(messages, fallbackReply) {
+async function normalizeReplyByJsonMode(messages, fallbackReply, usageCollector = null) {
   const data = await callDeepSeekChat({
     model: DEEPSEEK_MODEL,
     messages: [
@@ -678,6 +741,10 @@ async function normalizeReplyByJsonMode(messages, fallbackReply) {
   }, {
     thinkingEnabled: true
   });
+
+  if (usageCollector) {
+    usageCollector.current = mergeUsageSummary(usageCollector.current, getUsageSummaryFromResponse(data));
+  }
 
   const content = data
     && data.choices
@@ -1356,6 +1423,7 @@ export default async function handler(req, res) {
   }
 
   try {
+    const requestStartedAt = Date.now();
     const incomingMessages = Array.isArray(req.body && req.body.messages)
       ? req.body.messages
       : [];
@@ -1383,6 +1451,8 @@ export default async function handler(req, res) {
         thinkingEnabled: false
       });
 
+      const plainUsage = getUsageSummaryFromResponse(plainData);
+
       const plainMessage = plainData
         && plainData.choices
         && plainData.choices[0]
@@ -1392,7 +1462,8 @@ export default async function handler(req, res) {
         : "";
 
       return res.status(200).json({
-        reply: plainMessage || "处理完成，但暂时没有可展示的文本结果。"
+        reply: plainMessage || "处理完成，但暂时没有可展示的文本结果。",
+        usage: createResponseUsageSummary(plainUsage, Date.now() - requestStartedAt)
       });
     }
 
@@ -1435,7 +1506,9 @@ export default async function handler(req, res) {
       });
     }
 
-    const aiSearchIntent = await parseSearchIntentByAI(lastUserMessage);
+    const usageCollector = { current: null };
+
+    const aiSearchIntent = await parseSearchIntentByAI(lastUserMessage, usageCollector);
     const regexSearchIntent = parseSearchIntentByRegex(lastUserMessage);
     const parsedSearchIntentFromText = parseSearchIntentFromText(lastUserMessage);
     const userExplicitLimit = Number.isFinite(parsedSearchIntentFromText.limit)
@@ -1469,6 +1542,7 @@ export default async function handler(req, res) {
     };
 
     let finalReply = "";
+    let usageSummary = null;
 
     for (let loopIndex = 0; loopIndex < TOOL_LOOP_LIMIT; loopIndex += 1) {
       debugLog("tool.loop.iteration", { loopIndex: loopIndex + 1, limit: TOOL_LOOP_LIMIT });
@@ -1480,6 +1554,8 @@ export default async function handler(req, res) {
         useBeta: true,
         thinkingEnabled: true
       });
+
+      usageSummary = mergeUsageSummary(usageSummary, getUsageSummaryFromResponse(toolPlanData));
 
       const assistantMessage = toolPlanData
         && toolPlanData.choices
@@ -1530,14 +1606,19 @@ export default async function handler(req, res) {
     let normalizedReply = uiPayload.replyOverride || finalReply;
     if (!uiPayload.replyOverride) {
       try {
-        normalizedReply = await normalizeReplyByJsonMode(toolMessages, finalReply);
+        normalizedReply = await normalizeReplyByJsonMode(toolMessages, finalReply, usageCollector);
       } catch (err) {
         normalizedReply = finalReply;
       }
     }
 
+    usageSummary = mergeUsageSummary(usageSummary, usageCollector.current);
+
+    const responseUsage = createResponseUsageSummary(usageSummary, Date.now() - requestStartedAt);
+
     const responseBody = {
-      reply: normalizedReply
+      reply: normalizedReply,
+      usage: responseUsage
     };
 
     if (uiPayload.jmDownload) {
